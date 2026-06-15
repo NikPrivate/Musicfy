@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket, emit } from '../socket.js';
 import { getClientId, getProfile, saveProfile, hasProfile, clearIdentity } from '../identity.js';
@@ -231,26 +232,7 @@ export default function Room() {
 // ---- Share bar -----------------------------------------------------------
 
 function ShareBar({ code, onLeave, onEdit }) {
-  const [copied, setCopied] = useState(false);
-  const link = `${window.location.origin}/lobby/${code}`;
-
-  async function share() {
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: 'Join my Musicfy game!', url: link });
-        return;
-      }
-    } catch {
-      /* user cancelled native share */
-    }
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      window.prompt('Copy this link:', link);
-    }
-  }
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="share-bar card">
@@ -259,8 +241,8 @@ function ShareBar({ code, onLeave, onEdit }) {
         <strong className="code">{code}</strong>
       </div>
       <div className="share-bar-actions">
-        <button className="btn btn--primary" onClick={share}>
-          {copied ? '✓ Link copied!' : '🔗 Share invite link'}
+        <button className="btn btn--primary" onClick={() => setOpen(true)}>
+          🔗 Share invite link
         </button>
         {onEdit && (
           <button className="btn btn--ghost" onClick={onEdit}>
@@ -273,7 +255,50 @@ function ShareBar({ code, onLeave, onEdit }) {
           </button>
         )}
       </div>
+      {open && <ShareModal code={code} onClose={() => setOpen(false)} />}
     </div>
+  );
+}
+
+// A friendly invite popup: big lobby code + one-tap copy link.
+function ShareModal({ code, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const link = `${window.location.origin}/lobby/${code}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      window.prompt('Copy this link:', link);
+    }
+  }
+
+  return createPortal(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal card share-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Invite friends 🎉</h3>
+        <p className="muted">Send the link — it drops them straight into this lobby.</p>
+
+        <div className="share-code-big">
+          <span className="muted">Lobby code</span>
+          <strong>{code}</strong>
+        </div>
+
+        <div className="link-row">
+          <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invite link" />
+          <button className="btn btn--primary" onClick={copyLink}>
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
+
+        <div className="share-modal-actions">
+          <button className="btn btn--ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -299,12 +324,12 @@ function Stage({ state, you, isHost, isChooser, clientId }) {
 // ---- Lobby (waiting room + settings) -------------------------------------
 
 function LobbyStage({ state, isHost }) {
-  const [settings, setSettings] = useState(state.settings);
   const [error, setError] = useState('');
+  const s = state.settings;
 
   async function start() {
     setError('');
-    const res = await emit('game:start', { settings });
+    const res = await emit('game:start');
     if (!res.ok) setError(res.error || 'Could not start the game.');
   }
 
@@ -315,43 +340,12 @@ function LobbyStage({ state, isHost }) {
         Share the invite link above. Once everyone’s in, the host starts the game.
       </p>
 
-      <div className="settings">
-        <label className="field">
-          <span>Guess timer (sec)</span>
-          <input
-            type="number"
-            min="10"
-            max="300"
-            disabled={!isHost}
-            value={settings.roundTimer}
-            onChange={(e) => setSettings({ ...settings, roundTimer: +e.target.value })}
-          />
-        </label>
-        <label className="field">
-          <span>Default snippet (sec)</span>
-          <input
-            type="number"
-            min="3"
-            max="60"
-            disabled={!isHost}
-            value={settings.snippetDuration}
-            onChange={(e) => setSettings({ ...settings, snippetDuration: +e.target.value })}
-          />
-        </label>
-        <label className="field">
-          <span>Reveal a letter every (sec)</span>
-          <input
-            type="number"
-            min="3"
-            max="60"
-            disabled={!isHost}
-            value={settings.clueInterval}
-            onChange={(e) => setSettings({ ...settings, clueInterval: +e.target.value })}
-          />
-        </label>
-      </div>
-
-      <p className="muted">One round per player — {state.players.length} songs this game.</p>
+      <ul className="rules">
+        <li>⏱ <strong>{s.roundTimer}s</strong> to guess each song</li>
+        <li>🎧 <strong>{s.snippetDuration}s</strong> snippet — you choose which part</li>
+        <li>💡 A new letter revealed every <strong>{s.clueInterval}s</strong></li>
+        <li>🎵 One round per player — <strong>{state.players.length}</strong> songs this game</li>
+      </ul>
 
       {error && <p className="error">{error}</p>}
 
@@ -462,6 +456,12 @@ function PlayingStage({ state, isChooser, you }) {
         {round.ownerName}'s song
       </p>
 
+      {/* Album art stays blurred while guessing so it sets the mood without
+          giving the answer away; it's revealed sharp at round end. */}
+      {round.audio.artwork && (
+        <img src={round.audio.artwork} alt="" className="album-art album-art--blurred" />
+      )}
+
       <SnippetPlayer
         url={round.audio.url}
         startTime={round.audio.startTime}
@@ -470,11 +470,9 @@ function PlayingStage({ state, isChooser, you }) {
         loop
       />
 
-      <div className="masked">{round.masked.split('').map((c, i) => (
-        <span key={i} className={c === '_' ? 'mask-blank' : 'mask-char'}>{c === ' ' ? '  ' : c}</span>
-      ))}</div>
+      <MaskedTitle masked={round.masked} />
       <p className="muted clue-count">
-        {round.titleLength} characters · a new letter every {state.settings.clueInterval}s
+        Guess the title · a new letter every {state.settings.clueInterval}s
       </p>
 
       {isChooser ? (
@@ -528,6 +526,9 @@ function RoundEndStage({ state, isHost }) {
   return (
     <div className="card centered">
       <h2>Song {state.roundNumber} of {state.totalRounds} over!</h2>
+      {state.round?.audio?.artwork && (
+        <img src={state.round.audio.artwork} alt="album cover" className="album-art" />
+      )}
       <p className="answer-reveal">
         {ownerName ? `${ownerName}'s song was: ` : 'The song was: '}
         <strong>{answer}</strong>
@@ -654,6 +655,30 @@ function Confetti() {
             transform: `rotate(${p.rot}deg)`,
           }}
         />
+      ))}
+    </div>
+  );
+}
+
+// Renders the masked title grouped by WORDS. Each word is one non-breaking
+// block, so the blanks show each word's length and a word never splits across
+// rows — only whole words wrap. Punctuation is dropped for a clean look, so
+// "I Don't Care" reads as "_ ____ ____".
+function MaskedTitle({ masked }) {
+  const words = masked
+    .split(' ')
+    .map((w) => w.split('').filter((c) => c === '_' || /[a-z0-9]/i.test(c)))
+    .filter((chars) => chars.length > 0);
+  return (
+    <div className="masked">
+      {words.map((chars, wi) => (
+        <span className="mask-word" key={wi}>
+          {chars.map((c, ci) => (
+            <span key={ci} className={c === '_' ? 'mask-blank' : 'mask-char'}>
+              {c}
+            </span>
+          ))}
+        </span>
       ))}
     </div>
   );

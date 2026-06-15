@@ -11,10 +11,11 @@ export const PHASES = {
   GAME_END: 'gameEnd', // final scoreboard
 };
 
+// Fixed game rules (not configurable per-lobby).
 const DEFAULTS = {
-  roundTimer: 30, // seconds to guess (a song plays for the whole window)
-  snippetDuration: 30, // seconds of audio played (iTunes previews are ~30s)
-  clueInterval: 10, // reveal one more letter every N seconds, automatically
+  roundTimer: 30, // seconds to guess (the song plays for the whole window)
+  snippetDuration: 30, // fixed snippet length; players pick the start point only
+  clueInterval: 8, // reveal one more letter every N seconds, automatically
 };
 
 // Max players per lobby. Existing players reconnecting are always let back in;
@@ -177,12 +178,8 @@ export class Lobby {
 
   // Host kicks things off: everyone now searches for and submits their own
   // song simultaneously. Nothing plays yet.
-  startGame(settings = {}) {
-    this.settings = {
-      roundTimer: clampInt(settings.roundTimer, 10, 300, DEFAULTS.roundTimer),
-      snippetDuration: clampInt(settings.snippetDuration, 3, 60, DEFAULTS.snippetDuration),
-      clueInterval: clampInt(settings.clueInterval, 3, 60, DEFAULTS.clueInterval),
-    };
+  startGame() {
+    this.settings = { ...DEFAULTS }; // fixed rules, no per-lobby configuration
     for (const p of this.players.values()) {
       p.score = 0;
       p.song = null;

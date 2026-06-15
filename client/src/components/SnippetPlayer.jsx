@@ -10,6 +10,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState('');
   const [remaining, setRemaining] = useState(duration);
+  const [volume, setVolume] = useState(0.8);
 
   function stop() {
     const audio = audioRef.current;
@@ -23,6 +24,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
     const audio = audioRef.current;
     if (!audio) return;
     setError('');
+    audio.volume = volume;
     try {
       audio.currentTime = startTime;
     } catch {
@@ -80,6 +82,12 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
     }
   }, [url, autoPlay]);
 
+  // Adjust the element's volume directly — this never restarts the snippet, so
+  // dragging the slider mid-round doesn't reset the audio.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
+
   return (
     <div className="snippet-player">
       {/* Hidden native element drives playback. */}
@@ -87,6 +95,18 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
       <button className="btn btn--primary" onClick={playing ? stop : play}>
         {playing ? `⏸ Stop (${remaining}s)` : '▶ Play snippet'}
       </button>
+      <label className="volume" title="Volume">
+        <span aria-hidden="true">{volume === 0 ? '🔇' : '🔊'}</span>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+          aria-label="Volume"
+        />
+      </label>
       <span className="muted snippet-meta">
         {duration}s clip from {formatTime(startTime)}
       </span>

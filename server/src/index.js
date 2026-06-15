@@ -217,7 +217,7 @@ io.on('connection', (socket) => {
 
   // Host moves the lobby into the song-submission phase. Now EVERY player
   // searches for and submits their own song at the same time.
-  socket.on('game:start', ({ settings }, cb) => {
+  socket.on('game:start', (_payload, cb) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
     if (lobby.hostClientId !== socket.data.clientId) {
@@ -226,7 +226,7 @@ io.on('connection', (socket) => {
     if (lobby.players.size < 2) {
       return cb?.({ ok: false, error: 'Need at least 2 players' });
     }
-    lobby.startGame(settings);
+    lobby.startGame();
     cb?.({ ok: true });
     broadcast(lobby);
   });
@@ -234,14 +234,23 @@ io.on('connection', (socket) => {
   // A player submits (or changes) their chosen song + which part to play.
   socket.on('song:submit', ({ song }, cb) => {
     const lobby = manager.get(socket.data.code);
-    if (!lobby) return cb?.({ ok: false });
+    if (!lobby) return cb?.({ ok: false, error: 'Lobby not found' });
+    if (!socket.data.clientId) {
+      return cb?.({ ok: false, error: 'Not joined yet — refresh and try again.' });
+    }
     if (lobby.phase !== PHASES.SUBMITTING) {
       return cb?.({ ok: false, error: 'Not accepting songs right now' });
     }
     if (!song?.title || !song?.audioUrl) {
       return cb?.({ ok: false, error: 'Pick a song from the search results' });
     }
-    lobby.submitSong(socket.data.clientId, song);
+    // submitSong returns false if the player isn't in the lobby (e.g. a stale
+    // socket after a reconnect). Surface that instead of falsely confirming —
+    // otherwise the player thinks they're in but their song never plays.
+    const stored = lobby.submitSong(socket.data.clientId, song);
+    if (!stored) {
+      return cb?.({ ok: false, error: 'Could not save your song — please rejoin the lobby.' });
+    }
     cb?.({ ok: true });
     broadcast(lobby);
   });

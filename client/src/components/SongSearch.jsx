@@ -11,7 +11,6 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState(null); // a search result
   const [startTime, setStartTime] = useState(0);
-  const [duration, setDuration] = useState(defaultDuration);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // What we last locked in (for the confirmation card). Null after a reconnect
@@ -23,9 +22,10 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
   const debounce = useRef(null);
   const skipSearch = useRef(false);
   // How much audio we can choose from: a full Audius track (its whole length)
-  // or a 30s iTunes preview. Snippet length is capped at 60s (the server's max).
+  // or a 30s iTunes preview. The snippet length is FIXED — players only pick
+  // the start point (which part of the song to play).
   const trackLength = selected?.length || 30;
-  const maxDuration = Math.min(trackLength, 60);
+  const duration = Math.min(defaultDuration, trackLength, 60);
   const maxStart = Math.max(0, trackLength - duration);
 
   // Debounced live search as the player types.
@@ -65,7 +65,6 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
     setSearching(false);
     setQuery(`${result.title} — ${result.artist}`);
     setStartTime(0);
-    setDuration(Math.min(defaultDuration, result.length || 30, 60));
     setError('');
   }
 
@@ -184,29 +183,24 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
             duration={duration}
           />
 
-          <label className="field">
-            <span>Start at: {formatTime(Math.min(startTime, maxStart))} / {formatTime(trackLength)}</span>
-            <input
-              type="range"
-              min="0"
-              max={maxStart}
-              step="1"
-              value={Math.min(startTime, maxStart)}
-              onChange={(e) => setStartTime(Number(e.target.value))}
-            />
-          </label>
-
-          <label className="field">
-            <span>Snippet length: {duration}s</span>
-            <input
-              type="range"
-              min="3"
-              max={maxDuration}
-              step="1"
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            />
-          </label>
+          {maxStart > 0 ? (
+            <label className="field">
+              <span>
+                Start at: {formatTime(Math.min(startTime, maxStart))} / {formatTime(trackLength)}
+                {' '}· plays {duration}s
+              </span>
+              <input
+                type="range"
+                min="0"
+                max={maxStart}
+                step="1"
+                value={Math.min(startTime, maxStart)}
+                onChange={(e) => setStartTime(Number(e.target.value))}
+              />
+            </label>
+          ) : (
+            <p className="muted">Plays the full {duration}s clip from the start.</p>
+          )}
 
           {error && <p className="error">{error}</p>}
           <button className="btn btn--primary" onClick={submit} disabled={busy}>
