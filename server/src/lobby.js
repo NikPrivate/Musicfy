@@ -73,6 +73,10 @@ export class Lobby {
     this.code = code;
     this.players = new Map(); // clientId -> player
     this.hostClientId = null;
+    // The original lobby creator. Host may be temporarily handed to someone
+    // else while the creator is away, but the creator reclaims it when they
+    // return (see upsertPlayer).
+    this.creatorClientId = null;
     this.phase = PHASES.LOBBY;
     this.settings = { ...DEFAULTS };
 
@@ -116,7 +120,12 @@ export class Lobby {
       if (profile.username) player.username = profile.username.slice(0, 24);
       if (profile.avatar) player.avatar = profile.avatar;
     }
+    // First player to ever join is the lobby's creator + initial host.
+    if (!this.creatorClientId) this.creatorClientId = clientId;
     if (!this.hostClientId) this.hostClientId = clientId;
+    // The creator always reclaims the host crown when they (re)connect, even if
+    // it was temporarily handed to someone else while they were away.
+    if (clientId === this.creatorClientId) this.hostClientId = clientId;
     return { player, isNew };
   }
 
@@ -136,10 +145,16 @@ export class Lobby {
     return p;
   }
 
-  // If the host left, hand the crown to any remaining connected player.
+  // If the host left, hand the crown to a remaining connected player — favoring
+  // the lobby creator if they're still around (they reclaim it on return too).
   reassignHostIfNeeded() {
     const host = this.players.get(this.hostClientId);
     if (host && host.connected) return;
+    const creator = this.players.get(this.creatorClientId);
+    if (creator && creator.connected) {
+      this.hostClientId = this.creatorClientId;
+      return;
+    }
     const next = [...this.players.values()].find((p) => p.connected);
     this.hostClientId = next ? next.clientId : this.hostClientId;
   }
