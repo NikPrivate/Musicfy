@@ -8,9 +8,11 @@ import { useEffect, useRef, useState } from 'react';
 export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoPlay = false, loop = false }) {
   const audioRef = useRef(null);
   const tick = useRef(null);
+  // A ref (not state) so starting/stopping a drag never re-runs the playback
+  // effect — re-running it would pause the audio mid-drag.
+  const seeking = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0); // seconds into the snippet window
-  const [seeking, setSeeking] = useState(false);
   const [error, setError] = useState('');
   const [volume, setVolume] = useState(0.8);
 
@@ -66,7 +68,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
       clearTick();
       tick.current = setInterval(() => {
         const a = audioRef.current;
-        if (!a || seeking) return;
+        if (!a || seeking.current) return;
         let pos = a.currentTime - startTime;
         if (pos >= duration) {
           if (loop) {
@@ -103,7 +105,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
       clearTick();
       audio.pause();
     };
-  }, [startTime, duration, loop, seeking]);
+  }, [startTime, duration, loop]);
 
   // A new source/segment resets the playhead to the window start.
   useEffect(() => {
@@ -151,11 +153,11 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
         min="0"
         max={duration}
         step="0.1"
-        value={position}
-        onMouseDown={() => setSeeking(true)}
-        onTouchStart={() => setSeeking(true)}
-        onMouseUp={() => setSeeking(false)}
-        onTouchEnd={() => setSeeking(false)}
+        value={Math.min(Math.max(position, 0), duration)}
+        onMouseDown={() => (seeking.current = true)}
+        onTouchStart={() => (seeking.current = true)}
+        onMouseUp={() => (seeking.current = false)}
+        onTouchEnd={() => (seeking.current = false)}
         onChange={(e) => seek(Number(e.target.value))}
         aria-label="Seek"
       />

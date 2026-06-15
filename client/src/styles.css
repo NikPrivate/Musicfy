@@ -164,8 +164,24 @@ input:focus { outline: 2px solid var(--primary); }
 .snippet-player { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
 .snippet-meta { font-size: 13px; }
 .snippet-toggle { font-size: 18px; padding: 8px 14px; min-width: 48px; }
-.seek { flex: 1; min-width: 140px; accent-color: var(--primary); }
 .snippet-time { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Seek slider — explicit circular thumb so it sits flush at the start (value 0)
+   and looks consistent across browsers. */
+.seek {
+  flex: 1; min-width: 140px; height: 6px; appearance: none; -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.15); border-radius: 999px; cursor: pointer;
+}
+.seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--primary);
+  border: 2px solid #fff; margin-top: -1px;
+}
+.seek::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; background: var(--primary);
+  border: 2px solid #fff;
+}
+.seek::-moz-range-track { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.15); }
 
 /* Playing */
 .timer-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
