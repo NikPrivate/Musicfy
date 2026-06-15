@@ -1,0 +1,20 @@
+# Render Blueprint for Musicfy.
+# Deploy: push this repo to GitHub, then in the Render dashboard choose
+# "New +" -> "Blueprint" and point it at the repo. Render reads this file and
+# provisions the service automatically.
+#
+# Musicfy is a single web service: the Node server serves both the API/WebSocket
+# and the built React client (from client/dist), so one service is all you need.
+services:
+  - type: web
+    name: musicfy
+    runtime: node
+    plan: free # free tier supports WebSockets; spins down when idle (fine for testing)
+    # Install root + server + client deps, then build the React client.
+    buildCommand: npm install && npm run build:all
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      # PORT is provided by Render automatically; the server reads process.env.PORT.
