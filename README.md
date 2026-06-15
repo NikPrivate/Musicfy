@@ -23,8 +23,7 @@ as the clock ticks.
 - **Automatic letter clues** — the title shows its length up front, then reveals
   one more letter every 10s (configurable). No clicking required.
 - **Owner sits out** — you can't guess your own song.
-- **Profiles** — set a username and pick an emoji avatar (or paste an image URL)
-  when you join.
+- **Profiles** — set a username and pick an emoji avatar when you join.
 - **No duplicate players** — see below.
 
 ## 🛡️ How duplicate users are prevented

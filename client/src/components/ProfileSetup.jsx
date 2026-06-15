@@ -7,14 +7,17 @@ import Avatar from './Avatar.jsx';
 // (preventing duplicate players for the same person).
 export default function ProfileSetup({ initial, onSubmit }) {
   const [username, setUsername] = useState(initial?.username || '');
-  const [avatar, setAvatar] = useState(initial?.avatar || AVATARS[0]);
-  const [imageUrl, setImageUrl] = useState(isImageUrl(initial?.avatar) ? initial.avatar : '');
+  // Only emoji avatars are offered. If an older saved profile used an image
+  // URL, fall back to the first emoji.
+  const [avatar, setAvatar] = useState(
+    initial?.avatar && !isImageUrl(initial.avatar) ? initial.avatar : AVATARS[0]
+  );
 
   function submit(e) {
     e.preventDefault();
     const name = username.trim();
     if (!name) return;
-    onSubmit({ username: name, avatar: imageUrl.trim() || avatar });
+    onSubmit({ username: name, avatar });
   }
 
   return (
@@ -40,11 +43,8 @@ export default function ProfileSetup({ initial, onSubmit }) {
               <button
                 type="button"
                 key={a}
-                className={`avatar-pick ${avatar === a && !imageUrl ? 'selected' : ''}`}
-                onClick={() => {
-                  setAvatar(a);
-                  setImageUrl('');
-                }}
+                className={`avatar-pick ${avatar === a ? 'selected' : ''}`}
+                onClick={() => setAvatar(a)}
               >
                 {a}
               </button>
@@ -52,17 +52,8 @@ export default function ProfileSetup({ initial, onSubmit }) {
           </div>
         </div>
 
-        <label className="field">
-          <span>…or paste an image URL (optional)</span>
-          <input
-            placeholder="https://example.com/me.png"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-          />
-        </label>
-
         <div className="preview">
-          <Avatar value={imageUrl.trim() || avatar} size={56} />
+          <Avatar value={avatar} size={56} />
           <strong>{username.trim() || 'Your name'}</strong>
         </div>
 

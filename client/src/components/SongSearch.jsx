@@ -191,7 +191,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
 
           {error && <p className="error">{error}</p>}
           <button className="btn btn--primary" onClick={submit} disabled={busy}>
-            {busy ? 'Submitting…' : submitted ? 'Update my song ✓' : 'Lock in my song ✓'}
+            {busy ? 'Submitting…' : mySong || alreadySubmitted ? 'Update my song ✓' : 'Lock in my song ✓'}
           </button>
         </div>
       )}
