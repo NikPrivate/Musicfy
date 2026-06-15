@@ -21,6 +21,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
   const [editing, setEditing] = useState(!alreadySubmitted);
 
   const debounce = useRef(null);
+  const skipSearch = useRef(false);
   // How much audio we can choose from: a full Audius track (its whole length)
   // or a 30s iTunes preview. Snippet length is capped at 60s (the server's max).
   const trackLength = selected?.length || 30;
@@ -29,6 +30,12 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
 
   // Debounced live search as the player types.
   useEffect(() => {
+    // Picking a song auto-fills the box with the title — don't treat that as a
+    // new search (it would re-open the suggestions list we just closed).
+    if (skipSearch.current) {
+      skipSearch.current = false;
+      return;
+    }
     clearTimeout(debounce.current);
     const q = query.trim();
     if (q.length < 2) {
@@ -52,8 +59,10 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
   }, [query]);
 
   function pick(result) {
+    skipSearch.current = true; // suppress the re-search the title auto-fill triggers
     setSelected(result);
     setResults([]);
+    setSearching(false);
     setQuery(`${result.title} — ${result.artist}`);
     setStartTime(0);
     setDuration(Math.min(defaultDuration, result.length || 30, 60));
@@ -135,9 +144,9 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
         />
       </label>
 
-      {searching && <p className="muted">Searching…</p>}
+      {searching && !selected && <p className="muted">Searching…</p>}
 
-      {results.length > 0 && (
+      {!selected && results.length > 0 && (
         <ul className="suggestions">
           {results.map((r) => (
             <li key={r.id} className="suggestion" onClick={() => pick(r)}>
