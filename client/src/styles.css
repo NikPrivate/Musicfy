@@ -171,6 +171,9 @@ a.btn { text-decoration: none; display: inline-block; }
 .suggestion + .suggestion { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .suggestion-text { flex: 1; min-width: 0; }
 .art-sm { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
+.src-badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.src-full { background: rgba(29, 185, 84, 0.18); color: var(--primary-hover); }
+.src-clip { background: rgba(255, 255, 255, 0.08); color: var(--muted); }
 .art { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; }
 .picked-song { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
 .chosen { margin-top: 12px; }

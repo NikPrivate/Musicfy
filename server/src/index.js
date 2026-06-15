@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
-import { LobbyManager, PHASES } from './lobby.js';
+import { LobbyManager, PHASES, MAX_PLAYERS } from './lobby.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 4000;
@@ -28,35 +28,71 @@ app.get('/api/lobby/:code', (req, res) => {
   res.json({ code: lobby.code, phase: lobby.phase, players: lobby.players.size });
 });
 
-// Song search proxy. The browser calls this as the player types; we forward to
-// Apple's free iTunes Search API and return just the bits we need (title,
-// artist, artwork, and a ~30s preview clip URL the game can play). Proxying
-// keeps it reliable (no CORS surprises) and lets us trim the payload.
+// Audius: free, key-less streaming of FULL tracks. The stream endpoint serves
+// the whole MP3 with HTTP range support, so the player can seek to *any* point
+// — that's what lets users pick any part of the song. Catalog leans indie /
+// electronic / hip-hop, so we pair it with iTunes for mainstream coverage.
+const AUDIUS = 'https://api.audius.co/v1';
+const APP = 'Musicfy';
+
+async function searchAudius(q) {
+  const url = `${AUDIUS}/tracks/search?query=${encodeURIComponent(q)}&app_name=${APP}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Audius ${r.status}`);
+  const data = await r.json();
+  return (data.data || [])
+    .filter((t) => t.is_streamable !== false && t.duration > 0)
+    .slice(0, 5)
+    .map((t) => ({
+      id: `audius:${t.id}`,
+      source: 'audius',
+      full: true, // whole track — any segment is fair game
+      title: t.title,
+      artist: t.user?.name || 'Unknown artist',
+      artwork: t.artwork?.['480x480'] || t.artwork?.['150x150'] || '',
+      audioUrl: `${AUDIUS}/tracks/${t.id}/stream?app_name=${APP}`,
+      length: t.duration, // full track length in seconds
+    }));
+}
+
+async function searchItunes(q) {
+  const url =
+    'https://itunes.apple.com/search?media=music&entity=song&limit=6&term=' +
+    encodeURIComponent(q);
+  const r = await fetch(url, { headers: { 'User-Agent': 'Musicfy/1.0' } });
+  if (!r.ok) throw new Error(`iTunes ${r.status}`);
+  const data = await r.json();
+  return (data.results || [])
+    .filter((t) => t.previewUrl) // only songs we can actually play
+    .map((t) => ({
+      id: `itunes:${t.trackId}`,
+      source: 'itunes',
+      full: false, // ~30s preview clip only
+      title: t.trackName,
+      artist: t.artistName,
+      artwork: (t.artworkUrl100 || '').replace('100x100', '200x200'),
+      audioUrl: t.previewUrl,
+      length: 30,
+    }));
+}
+
+// Song search proxy. The browser calls this as the player types. We query
+// Audius (full songs) and iTunes (mainstream 30s previews) in parallel and
+// return a single normalized list; one source failing doesn't break the other.
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').toString().trim();
   if (!q) return res.json({ results: [] });
-  try {
-    const url =
-      'https://itunes.apple.com/search?media=music&entity=song&limit=8&term=' +
-      encodeURIComponent(q);
-    const r = await fetch(url, { headers: { 'User-Agent': 'Musicfy/1.0' } });
-    if (!r.ok) throw new Error(`iTunes ${r.status}`);
-    const data = await r.json();
-    const results = (data.results || [])
-      .filter((t) => t.previewUrl) // only songs we can actually play
-      .map((t) => ({
-        id: t.trackId,
-        title: t.trackName,
-        artist: t.artistName,
-        artwork: (t.artworkUrl100 || '').replace('100x100', '200x200'),
-        previewUrl: t.previewUrl,
-        previewLength: 30, // iTunes previews are ~30s
-      }));
-    res.json({ results });
-  } catch (err) {
-    console.error('search failed:', err.message);
-    res.status(502).json({ results: [], error: 'Search unavailable' });
+  const [audius, itunes] = await Promise.allSettled([searchAudius(q), searchItunes(q)]);
+  if (audius.status === 'rejected') console.error('Audius search failed:', audius.reason?.message);
+  if (itunes.status === 'rejected') console.error('iTunes search failed:', itunes.reason?.message);
+  const results = [
+    ...(audius.status === 'fulfilled' ? audius.value : []),
+    ...(itunes.status === 'fulfilled' ? itunes.value : []),
+  ];
+  if (!results.length && audius.status === 'rejected' && itunes.status === 'rejected') {
+    return res.status(502).json({ results: [], error: 'Search unavailable' });
   }
+  res.json({ results });
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -145,6 +181,12 @@ io.on('connection', (socket) => {
     const lobby = manager.get(code);
     if (!lobby) return cb?.({ ok: false, error: 'Lobby not found' });
     if (!clientId) return cb?.({ ok: false, error: 'Missing client id' });
+
+    // Enforce the player cap, but never lock out someone already in the lobby
+    // who is just reconnecting/refreshing.
+    if (!lobby.players.has(clientId) && lobby.isFull()) {
+      return cb?.({ ok: false, error: `Lobby is full (max ${MAX_PLAYERS} players)`, full: true });
+    }
 
     const { player, isNew } = lobby.upsertPlayer(clientId, socket.id, profile);
 

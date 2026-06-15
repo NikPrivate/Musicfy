@@ -83,7 +83,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
   return (
     <div className="snippet-player">
       {/* Hidden native element drives playback. */}
-      <audio ref={audioRef} src={url} preload="auto" crossOrigin="anonymous" />
+      <audio ref={audioRef} src={url} preload="auto" />
       <button className="btn btn--primary" onClick={playing ? stop : play}>
         {playing ? `⏸ Stop (${remaining}s)` : '▶ Play snippet'}
       </button>

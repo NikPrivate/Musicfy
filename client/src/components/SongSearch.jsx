@@ -21,8 +21,11 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
   const [editing, setEditing] = useState(!alreadySubmitted);
 
   const debounce = useRef(null);
-  const previewLength = selected?.previewLength || 30;
-  const maxStart = Math.max(0, previewLength - duration);
+  // How much audio we can choose from: a full Audius track (its whole length)
+  // or a 30s iTunes preview. Snippet length is capped at 60s (the server's max).
+  const trackLength = selected?.length || 30;
+  const maxDuration = Math.min(trackLength, 60);
+  const maxStart = Math.max(0, trackLength - duration);
 
   // Debounced live search as the player types.
   useEffect(() => {
@@ -53,7 +56,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
     setResults([]);
     setQuery(`${result.title} — ${result.artist}`);
     setStartTime(0);
-    setDuration(Math.min(defaultDuration, result.previewLength || 30));
+    setDuration(Math.min(defaultDuration, result.length || 30, 60));
     setError('');
   }
 
@@ -65,7 +68,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
       song: {
         title: selected.title,
         artist: selected.artist,
-        audioUrl: selected.previewUrl,
+        audioUrl: selected.audioUrl,
         artwork: selected.artwork,
         startTime: Math.min(startTime, maxStart),
         duration,
@@ -143,6 +146,9 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
                 <strong>{r.title}</strong>
                 <span className="muted"> · {r.artist}</span>
               </span>
+              <span className={`src-badge ${r.full ? 'src-full' : 'src-clip'}`}>
+                {r.full ? 'full track' : '30s clip'}
+              </span>
             </li>
           ))}
         </ul>
@@ -158,15 +164,19 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
             </div>
           </div>
 
-          <p className="muted">Preview the part you'll make them guess:</p>
+          <p className="muted">
+            {selected.full
+              ? `Full track (${formatTime(trackLength)}) — pick any part:`
+              : "Preview the part you'll make them guess:"}
+          </p>
           <SnippetPlayer
-            url={selected.previewUrl}
+            url={selected.audioUrl}
             startTime={Math.min(startTime, maxStart)}
             duration={duration}
           />
 
           <label className="field">
-            <span>Start at: {formatTime(Math.min(startTime, maxStart))}</span>
+            <span>Start at: {formatTime(Math.min(startTime, maxStart))} / {formatTime(trackLength)}</span>
             <input
               type="range"
               min="0"
@@ -182,7 +192,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
             <input
               type="range"
               min="3"
-              max={previewLength}
+              max={maxDuration}
               step="1"
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}

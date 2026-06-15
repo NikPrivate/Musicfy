@@ -14,6 +14,7 @@ export default function Room() {
   const [state, setState] = useState(null); // public lobby state
   const [joined, setJoined] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [joinError, setJoinError] = useState(''); // e.g. "Lobby is full"
   // needProfile drives whether we show the setup screen. If the user already
   // has a saved profile we skip it and auto-join — so re-clicking the share
   // link never spawns a duplicate player.
@@ -27,9 +28,11 @@ export default function Room() {
   async function doJoin(profile) {
     const res = await emit('lobby:join', { code, clientId, profile });
     if (!res.ok) {
-      setNotFound(true);
+      if (res.full) setJoinError(res.error || 'This lobby is full.');
+      else setNotFound(true);
       return;
     }
+    setJoinError('');
     setState(res.state);
     setJoined(true);
     setNeedProfile(false);
@@ -83,6 +86,16 @@ export default function Room() {
     );
   }
 
+  if (joinError) {
+    return (
+      <div className="card centered">
+        <h2>Lobby is full 🙈</h2>
+        <p className="muted">{joinError}</p>
+        <a className="btn" href="/">← Back home</a>
+      </div>
+    );
+  }
+
   if (needProfile && !joined) {
     return (
       <div className="room">
@@ -107,7 +120,7 @@ export default function Room() {
       <div className="room-grid">
         <aside className="card sidebar">
           <h3>
-            Players <span className="muted">({state.players.length})</span>
+            Players <span className="muted">({state.players.length} / {state.maxPlayers})</span>
           </h3>
           <PlayerList players={state.players} youId={clientId} />
           {(state.phase === 'playing' || state.phase === 'roundEnd') && (

@@ -65,10 +65,19 @@ npm start       # serves the app + API from the Node server on :4000
 
 ## 🎧 About the audio
 
-Songs come from the free **iTunes Search API** (proxied through the server at
-`/api/search`). Each result includes a ~30s preview clip, which is what the game
-plays — no manual audio URLs needed. The player only plays the chosen segment
-(`startTime` → `startTime + duration`) and loops it for the round.
+Search hits two free sources in parallel (proxied through `/api/search`):
+
+- **Audius** — streams the **full track** with HTTP range support, so the picker
+  can choose **any segment of the whole song**. Results are badged *full track*.
+  Catalog leans indie / electronic / hip-hop / lo-fi (and user covers/remixes of
+  mainstream songs), so the answer is whatever title the upload uses.
+- **iTunes** — ~30s preview clips of **mainstream** tracks with clean official
+  titles. Results are badged *30s clip*; the "which part" choice is limited to
+  that 30s window.
+
+Each player sees both and picks: a full track when they want any-part control,
+or a 30s mainstream clip when recognisability matters. The chosen segment
+(`startTime` → `startTime + duration`, snippet capped at 60s) loops for the round.
 
 ## 🗂️ Project structure
 

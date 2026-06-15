@@ -17,6 +17,10 @@ const DEFAULTS = {
   clueInterval: 10, // reveal one more letter every N seconds, automatically
 };
 
+// Max players per lobby. Existing players reconnecting are always let back in;
+// only brand-new joins are turned away once this many are connected.
+export const MAX_PLAYERS = 12;
+
 // Normalize a guess/answer for comparison: lowercase, strip anything that
 // isn't a letter or number, collapse whitespace. So "Don't Stop Me Now!" ==
 // "dont stop me now".
@@ -142,6 +146,16 @@ export class Lobby {
 
   isEmpty() {
     return [...this.players.values()].every((p) => !p.connected);
+  }
+
+  // Count of currently-connected players (used for the join cap). Disconnected
+  // "ghosts" don't count, so they never lock out new players.
+  connectedCount() {
+    return [...this.players.values()].filter((p) => p.connected).length;
+  }
+
+  isFull() {
+    return this.connectedCount() >= MAX_PLAYERS;
   }
 
   // ---- game flow ---------------------------------------------------------
@@ -303,6 +317,7 @@ export class Lobby {
       hostClientId: this.hostClientId,
       chooserClientId: this.ownerClientId,
       players,
+      maxPlayers: MAX_PLAYERS,
       roundEndsAt: this.roundEndsAt,
     };
 
