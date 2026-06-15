@@ -674,8 +674,8 @@ function MaskedTitle({ masked }) {
       {words.map((chars, wi) => (
         <span className="mask-word" key={wi}>
           {chars.map((c, ci) => (
-            <span key={ci} className={c === '_' ? 'mask-blank' : 'mask-char'}>
-              {c}
+            <span key={ci} className={`mask-slot ${c === '_' ? 'is-blank' : 'is-filled'}`}>
+              {c === '_' ? '' : c}
             </span>
           ))}
         </span>
