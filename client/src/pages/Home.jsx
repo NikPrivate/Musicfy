@@ -35,7 +35,17 @@ export default function Home() {
   return (
     <div className="home">
       <header className="hero">
-        <h1>🎵 Musicfy</h1>
+        <h1>
+          <svg
+            className="logo-note"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M9 17.5a2.5 2.5 0 1 1-2.5-2.5c.55 0 1.06.18 1.5.46V4l11-2v11.5a2.5 2.5 0 1 1-2-2.45V5.3L9 6.7v10.8z" />
+          </svg>
+          Musicfy
+        </h1>
         <p className="tagline">The multiplayer “guess the song” party game.</p>
       </header>
 

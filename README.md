@@ -3,18 +3,26 @@
 A real-time, multiplayer "guess the song" party game built with **React (Vite)**
 on the front end and **Node.js + Express + Socket.IO** on the back end.
 
-One player picks a song and the exact snippet to play; everyone else races to
-guess the title before the timer runs out. Stuck? Spend a clue to reveal a
-letter — but it costs points.
+When the host starts, **everyone picks a song at the same time** — search by
+name, choose from live suggestions, and set the exact part of the clip to play.
+Then each player's song is played in turn and everyone else races to guess the
+title before the timer runs out. The masked title fills in one letter at a time
+as the clock ticks.
 
 ## ✨ Features
 
 - **Multiplayer & real-time** — powered by Socket.IO.
 - **Create a lobby** and invite friends with a **shareable link** (or 5-letter code).
-- **Pick a song to guess** — the chooser sets the title, an audio URL, *which part*
-  of the track to play (start time), and a **fixed snippet duration**.
-- **Round timer** (default 60s, configurable).
-- **Letter clues** — reveal letters of the answer one at a time (with a score penalty).
+- **Everyone submits a song** — after the host starts, every player **searches**
+  for a track (live iTunes suggestions), then picks *which part* of the ~30s
+  preview to play. One round per player.
+- **The twist** — you choose the snippet (start point + length) of *your* song,
+  so you decide how hard it is to recognise.
+- **Round timer** (default 30s, configurable). The chosen snippet loops while
+  everyone guesses.
+- **Automatic letter clues** — the title shows its length up front, then reveals
+  one more letter every 10s (configurable). No clicking required.
+- **Owner sits out** — you can't guess your own song.
 - **Profiles** — set a username and pick an emoji avatar (or paste an image URL)
   when you join.
 - **No duplicate players** — see below.
@@ -58,10 +66,10 @@ npm start       # serves the app + API from the Node server on :4000
 
 ## 🎧 About the audio
 
-The chooser provides a **direct link to an audio file** (`.mp3`, `.ogg`, `.m4a`).
-The player only plays the chosen segment (`startTime` → `startTime + duration`).
-Use a host that allows cross-origin playback (sends proper CORS headers) for the
-snippet to load.
+Songs come from the free **iTunes Search API** (proxied through the server at
+`/api/search`). Each result includes a ~30s preview clip, which is what the game
+plays — no manual audio URLs needed. The player only plays the chosen segment
+(`startTime` → `startTime + duration`) and loops it for the round.
 
 ## 🗂️ Project structure
 
@@ -76,14 +84,15 @@ Musicfy/
         ├── identity.js     # clientId + profile persistence (dedup)
         ├── socket.js       # socket.io-client singleton
         ├── pages/          # Home, Room (phase router)
-        └── components/     # ProfileSetup, SongPicker, SnippetPlayer, …
+        └── components/     # ProfileSetup, SongSearch, SnippetPlayer, …
 ```
 
 ## 🎮 Game flow
 
-`lobby` → host starts → `selecting` (chooser picks a song) → `playing`
-(snippet + guessing + clues + timer) → `roundEnd` (reveal + scores) → next
-chooser … → `gameEnd` (final scoreboard, play again).
+`lobby` → host starts → `submitting` (**everyone** searches & picks their song
+at once) → host begins → `playing` (one player's snippet loops while the rest
+guess; letters auto-reveal on a timer) → `roundEnd` (reveal + scores) → next
+player's song … → `gameEnd` (final scoreboard, play again).
 
-Scoring rewards fast guesses and penalizes clues:
-`points = max(20, 100 + secondsLeft − clues×15)`.
+Scoring rewards fast guesses:
+`points = max(20, round(20 + 80 × secondsLeft / roundTimer))`.

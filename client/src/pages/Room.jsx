@@ -4,7 +4,7 @@ import { socket, emit } from '../socket.js';
 import { getClientId, getProfile, saveProfile, hasProfile } from '../identity.js';
 import ProfileSetup from '../components/ProfileSetup.jsx';
 import PlayerList from '../components/PlayerList.jsx';
-import SongPicker from '../components/SongPicker.jsx';
+import SongSearch from '../components/SongSearch.jsx';
 import SnippetPlayer from '../components/SnippetPlayer.jsx';
 
 export default function Room() {
@@ -110,9 +110,14 @@ export default function Room() {
             Players <span className="muted">({state.players.length})</span>
           </h3>
           <PlayerList players={state.players} youId={clientId} />
-          {state.phase !== 'lobby' && (
+          {(state.phase === 'playing' || state.phase === 'roundEnd') && (
             <p className="round-indicator">
-              Round {state.roundNumber} / {state.totalRounds}
+              Song {state.roundNumber} / {state.totalRounds}
+            </p>
+          )}
+          {state.phase === 'submitting' && (
+            <p className="round-indicator">
+              {state.players.filter((p) => p.hasSubmitted).length} / {state.totalRounds} picked
             </p>
           )}
         </aside>
@@ -174,8 +179,8 @@ function Stage({ state, you, isHost, isChooser, clientId }) {
   switch (state.phase) {
     case 'lobby':
       return <LobbyStage state={state} isHost={isHost} />;
-    case 'selecting':
-      return <SelectingStage state={state} isChooser={isChooser} />;
+    case 'submitting':
+      return <SubmittingStage state={state} isHost={isHost} you={you} />;
     case 'playing':
       return <PlayingStage state={state} isChooser={isChooser} you={you} />;
     case 'roundEnd':
@@ -208,17 +213,6 @@ function LobbyStage({ state, isHost }) {
 
       <div className="settings">
         <label className="field">
-          <span>Rounds</span>
-          <input
-            type="number"
-            min="1"
-            max="20"
-            disabled={!isHost}
-            value={settings.totalRounds}
-            onChange={(e) => setSettings({ ...settings, totalRounds: +e.target.value })}
-          />
-        </label>
-        <label className="field">
           <span>Guess timer (sec)</span>
           <input
             type="number"
@@ -240,7 +234,20 @@ function LobbyStage({ state, isHost }) {
             onChange={(e) => setSettings({ ...settings, snippetDuration: +e.target.value })}
           />
         </label>
+        <label className="field">
+          <span>Reveal a letter every (sec)</span>
+          <input
+            type="number"
+            min="3"
+            max="60"
+            disabled={!isHost}
+            value={settings.clueInterval}
+            onChange={(e) => setSettings({ ...settings, clueInterval: +e.target.value })}
+          />
+        </label>
       </div>
+
+      <p className="muted">One round per player — {state.players.length} songs this game.</p>
 
       {error && <p className="error">{error}</p>}
 
@@ -250,7 +257,7 @@ function LobbyStage({ state, isHost }) {
           onClick={start}
           disabled={state.players.length < 2}
         >
-          {state.players.length < 2 ? 'Need at least 2 players…' : 'Start game 🎉'}
+          {state.players.length < 2 ? 'Need at least 2 players…' : 'Start — everyone picks 🎉'}
         </button>
       ) : (
         <p className="muted">Waiting for the host to start…</p>
@@ -259,18 +266,58 @@ function LobbyStage({ state, isHost }) {
   );
 }
 
-// ---- Selecting -----------------------------------------------------------
+// ---- Submitting (everyone picks their song at once) ----------------------
 
-function SelectingStage({ state, isChooser }) {
-  if (isChooser) {
-    return <SongPicker defaultDuration={state.settings.snippetDuration} />;
+function SubmittingStage({ state, isHost, you }) {
+  const [error, setError] = useState('');
+  const connected = state.players.filter((p) => p.connected);
+  const submittedCount = connected.filter((p) => p.hasSubmitted).length;
+  const allReady = submittedCount === connected.length;
+
+  async function begin() {
+    setError('');
+    const res = await emit('game:begin');
+    if (!res.ok) setError(res.error || 'Could not begin the game.');
   }
-  const chooser = state.players.find((p) => p.clientId === state.chooserClientId);
+
   return (
-    <div className="card centered">
-      <h2>🎶 {chooser?.username || 'Someone'} is picking a song…</h2>
-      <p className="muted">Get ready to guess!</p>
-      <div className="pulse">🎧</div>
+    <div className="submitting">
+      <SongSearch
+        defaultDuration={state.settings.snippetDuration}
+        alreadySubmitted={!!you?.hasSubmitted}
+      />
+
+      <div className="card">
+        <h3>
+          Who's ready? <span className="muted">({submittedCount}/{connected.length})</span>
+        </h3>
+        <ul className="player-list">
+          {connected.map((p) => (
+            <li key={p.clientId} className="player">
+              <span className="player-name">{p.username}</span>
+              <span>{p.hasSubmitted ? '✅ ready' : '⏳ picking…'}</span>
+            </li>
+          ))}
+        </ul>
+
+        {error && <p className="error">{error}</p>}
+
+        {isHost ? (
+          <button
+            className="btn btn--primary btn--big"
+            onClick={begin}
+            disabled={submittedCount < 2}
+          >
+            {submittedCount < 2
+              ? 'Need at least 2 songs…'
+              : allReady
+                ? 'Begin — play the songs! ▶'
+                : `Begin anyway (${submittedCount} ready) ▶`}
+          </button>
+        ) : (
+          <p className="muted">The host starts once everyone has picked.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -297,11 +344,6 @@ function PlayingStage({ state, isChooser, you }) {
     }
   }
 
-  async function getClue() {
-    const res = await emit('round:clue');
-    if (!res.revealed) setFeedback('No more letters to reveal.');
-  }
-
   return (
     <div className="card playing">
       <div className="timer-bar">
@@ -309,20 +351,30 @@ function PlayingStage({ state, isChooser, you }) {
         {round?.artistHint && <span className="muted">Artist: {round.artistHint}</span>}
       </div>
 
+      <p className="muted centered">
+        <svg className="note-inline" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M9 17.5a2.5 2.5 0 1 1-2.5-2.5c.55 0 1.06.18 1.5.46V4l11-2v11.5a2.5 2.5 0 1 1-2-2.45V5.3L9 6.7v10.8z" />
+        </svg>{' '}
+        {round.ownerName}'s song
+      </p>
+
       <SnippetPlayer
         url={round.audio.url}
         startTime={round.audio.startTime}
         duration={round.audio.duration}
         autoPlay={!isChooser}
+        loop
       />
 
       <div className="masked">{round.masked.split('').map((c, i) => (
         <span key={i} className={c === '_' ? 'mask-blank' : 'mask-char'}>{c === ' ' ? '  ' : c}</span>
       ))}</div>
-      <p className="muted clue-count">Clues used: {round.cluesUsed}</p>
+      <p className="muted clue-count">
+        {round.titleLength} characters · a new letter every {state.settings.clueInterval}s
+      </p>
 
       {isChooser ? (
-        <ChooserView />
+        <OwnerView />
       ) : alreadyGuessed ? (
         <p className="success">🎉 You got it! Waiting for the round to end…</p>
       ) : (
@@ -334,9 +386,6 @@ function PlayingStage({ state, isChooser, you }) {
             onChange={(e) => setGuess(e.target.value)}
           />
           <button className="btn btn--primary" type="submit">Guess</button>
-          <button className="btn" type="button" onClick={getClue} title="Reveal a letter (costs points)">
-            💡 Clue
-          </button>
         </form>
       )}
       {feedback && <p className="feedback">{feedback}</p>}
@@ -344,9 +393,9 @@ function PlayingStage({ state, isChooser, you }) {
   );
 }
 
-// The chooser knows the answer — show it privately so they can confirm the
-// snippet is right; they can't guess.
-function ChooserView() {
+// The owner picked this song, so they already know the answer — they sit the
+// round out and watch the guesses roll in.
+function OwnerView() {
   const [answer, setAnswer] = useState('');
   useEffect(() => {
     function onAnswer({ title }) {
@@ -357,7 +406,7 @@ function ChooserView() {
   }, []);
   return (
     <div className="chooser-view">
-      <p className="muted">You picked this round — sit back and watch the guesses roll in.</p>
+      <p className="muted">This is your song — sit back and watch everyone guess.</p>
       {answer && <p className="answer-reveal">Answer: <strong>{answer}</strong></p>}
     </div>
   );
@@ -367,18 +416,23 @@ function ChooserView() {
 
 function RoundEndStage({ state, isHost }) {
   const answer = state.round?.answer;
+  const ownerName = state.round?.ownerName;
+  const isLast = state.roundNumber >= state.totalRounds;
   async function next() {
     await emit('round:next');
   }
   return (
     <div className="card centered">
-      <h2>Round {state.roundNumber} over!</h2>
-      <p className="answer-reveal">The song was: <strong>{answer}</strong></p>
+      <h2>Song {state.roundNumber} of {state.totalRounds} over!</h2>
+      <p className="answer-reveal">
+        {ownerName ? `${ownerName}'s song was: ` : 'The song was: '}
+        <strong>{answer}</strong>
+      </p>
       <h3>Scoreboard</h3>
       <PlayerList players={state.players} youId={null} />
       {isHost ? (
         <button className="btn btn--primary btn--big" onClick={next}>
-          {state.roundNumber >= state.totalRounds ? 'See final results →' : 'Next round →'}
+          {isLast ? 'See final results →' : 'Next song →'}
         </button>
       ) : (
         <p className="muted">Waiting for the host to continue…</p>

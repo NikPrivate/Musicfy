@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 // `duration` seconds, then auto-stops. A replay button lets players hear it
 // again. Browsers block autoplay without a gesture, so playback starts when
 // the player taps "Play snippet".
-export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoPlay = false }) {
+export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoPlay = false, loop = false }) {
   const audioRef = useRef(null);
   const stopTimer = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -42,12 +42,21 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
     function onPlay() {
       setPlaying(true);
       audio.currentTime = Math.max(startTime, audio.currentTime);
-      const endAt = Date.now() + duration * 1000;
+      let endAt = Date.now() + duration * 1000;
       clearInterval(stopTimer.current);
       stopTimer.current = setInterval(() => {
         const left = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
         setRemaining(left);
-        if (Date.now() >= endAt) stop();
+        if (Date.now() >= endAt) {
+          if (loop) {
+            // Replay the same segment so the song keeps going for the whole
+            // guessing window instead of stopping after one pass.
+            audio.currentTime = startTime;
+            endAt = Date.now() + duration * 1000;
+          } else {
+            stop();
+          }
+        }
       }, 200);
     }
     function onError() {
@@ -62,7 +71,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
       clearInterval(stopTimer.current);
       audio.pause();
     };
-  }, [url, startTime, duration]);
+  }, [url, startTime, duration, loop]);
 
   useEffect(() => {
     if (autoPlay) {

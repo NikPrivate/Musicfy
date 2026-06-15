@@ -12,7 +12,7 @@ export default function PlayerList({ players, youId, showScores = true }) {
           </span>
           <span className="player-badges">
             {p.isHost && <span className="badge badge--host" title="Host">👑</span>}
-            {p.isChooser && <span className="badge badge--chooser" title="Picking the song">🎶</span>}
+            {p.isChooser && <span className="badge badge--chooser" title="Their song is playing">🎶</span>}
             {p.hasGuessed && <span className="badge badge--correct" title="Guessed it!">✅</span>}
             {!p.connected && <span className="badge" title="Disconnected">💤</span>}
           </span>

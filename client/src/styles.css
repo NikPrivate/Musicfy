@@ -1,16 +1,16 @@
 :root {
-  --bg: #0f0c29;
-  --bg2: #302b63;
-  --bg3: #24243e;
+  --bg: #0a0a0a;
+  --bg2: #181818;
+  --bg3: #0d0d0d;
   --card: rgba(255, 255, 255, 0.06);
-  --card-border: rgba(255, 255, 255, 0.12);
-  --text: #f5f3ff;
-  --muted: #b8b3d6;
-  --primary: #8b5cf6;
-  --primary-hover: #a78bfa;
-  --accent: #f472b6;
-  --good: #34d399;
-  --bad: #fb7185;
+  --card-border: rgba(255, 255, 255, 0.1);
+  --text: #ffffff;
+  --muted: #b3b3b3;
+  --primary: #1db954;
+  --primary-hover: #1ed760;
+  --accent: #1ed760;
+  --good: #1db954;
+  --bad: #f15e6c;
   --radius: 16px;
 }
 
@@ -79,7 +79,12 @@ input:focus { outline: 2px solid var(--primary); }
 
 /* Home */
 .hero { text-align: center; padding: 32px 0 8px; }
-.hero h1 { font-size: 56px; margin-bottom: 4px; }
+.hero h1 {
+  font-size: 56px; margin-bottom: 4px; color: var(--primary); letter-spacing: -1px;
+  display: inline-flex; align-items: center; gap: 12px;
+}
+.logo-note { width: 48px; height: 48px; flex-shrink: 0; }
+.note-inline { width: 16px; height: 16px; vertical-align: -2px; color: var(--primary); }
 .tagline { font-size: 18px; color: var(--muted); }
 .home-actions { text-align: center; }
 .divider { display: flex; align-items: center; gap: 12px; color: var(--muted); margin: 18px 0; }
@@ -117,7 +122,7 @@ input:focus { outline: 2px solid var(--primary); }
   font-size: 22px; padding: 6px; border-radius: 10px; cursor: pointer;
   background: rgba(0, 0, 0, 0.25); border: 2px solid transparent;
 }
-.avatar-pick.selected { border-color: var(--primary); background: rgba(139, 92, 246, 0.25); }
+.avatar-pick.selected { border-color: var(--primary); background: rgba(29, 185, 84, 0.25); }
 .preview { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: 18px; }
 
 /* Settings */
@@ -152,3 +157,21 @@ input:focus { outline: 2px solid var(--primary); }
 
 a.btn { text-decoration: none; display: inline-block; }
 .badge { font-size: 14px; }
+
+/* Song search (submission phase) */
+.submitting { display: grid; gap: 16px; }
+.song-search .suggestions {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; overflow: hidden;
+}
+.suggestion {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer;
+}
+.suggestion:hover { background: rgba(29, 185, 84, 0.18); }
+.suggestion + .suggestion { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.suggestion-text { flex: 1; min-width: 0; }
+.art-sm { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; }
+.art { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; }
+.picked-song { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.chosen { margin-top: 12px; }
+.chosen input[type='range'] { width: 100%; }

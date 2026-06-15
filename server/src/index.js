@@ -28,6 +28,37 @@ app.get('/api/lobby/:code', (req, res) => {
   res.json({ code: lobby.code, phase: lobby.phase, players: lobby.players.size });
 });
 
+// Song search proxy. The browser calls this as the player types; we forward to
+// Apple's free iTunes Search API and return just the bits we need (title,
+// artist, artwork, and a ~30s preview clip URL the game can play). Proxying
+// keeps it reliable (no CORS surprises) and lets us trim the payload.
+app.get('/api/search', async (req, res) => {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.json({ results: [] });
+  try {
+    const url =
+      'https://itunes.apple.com/search?media=music&entity=song&limit=8&term=' +
+      encodeURIComponent(q);
+    const r = await fetch(url, { headers: { 'User-Agent': 'Musicfy/1.0' } });
+    if (!r.ok) throw new Error(`iTunes ${r.status}`);
+    const data = await r.json();
+    const results = (data.results || [])
+      .filter((t) => t.previewUrl) // only songs we can actually play
+      .map((t) => ({
+        id: t.trackId,
+        title: t.trackName,
+        artist: t.artistName,
+        artwork: (t.artworkUrl100 || '').replace('100x100', '200x200'),
+        previewUrl: t.previewUrl,
+        previewLength: 30, // iTunes previews are ~30s
+      }));
+    res.json({ results });
+  } catch (err) {
+    console.error('search failed:', err.message);
+    res.status(502).json({ results: [], error: 'Search unavailable' });
+  }
+});
+
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // Serve the built client in production.
@@ -40,13 +71,13 @@ app.get(/^(?!\/api|\/socket\.io).*/, (_req, res) => {
 });
 
 // Broadcast the public state of a lobby to everyone in its room, and send the
-// chooser their private answer view.
+// song's owner their private answer view.
 function broadcast(lobby) {
   io.to(lobby.code).emit('lobby:state', lobby.publicState());
   if (lobby.song && lobby.phase === PHASES.PLAYING) {
-    const chooser = lobby.players.get(lobby.chooserClientId);
-    if (chooser?.socketId) {
-      io.to(chooser.socketId).emit('round:answer', { title: lobby.song.title });
+    const owner = lobby.players.get(lobby.ownerClientId);
+    if (owner?.socketId) {
+      io.to(owner.socketId).emit('round:answer', { title: lobby.song.title });
     }
   }
 }
@@ -58,15 +89,41 @@ function scheduleRoundTimer(lobby) {
   const ms = Math.max(0, lobby.roundEndsAt - Date.now());
   lobby.timer = setTimeout(() => {
     if (lobby.phase === PHASES.PLAYING) {
+      stopClueTimer(lobby);
       lobby.endRound();
       broadcast(lobby);
     }
   }, ms);
 }
 
+// Automatically reveal one more letter every `clueInterval` seconds while a
+// round is live, so the title fills in like a hangman clue without anyone
+// having to click anything.
+function scheduleClueTimer(lobby) {
+  stopClueTimer(lobby);
+  const everyMs = Math.max(1, lobby.settings.clueInterval) * 1000;
+  lobby.clueTimer = setInterval(() => {
+    if (lobby.phase !== PHASES.PLAYING) return stopClueTimer(lobby);
+    if (lobby.revealClue()) broadcast(lobby);
+  }, everyMs);
+}
+
+function stopClueTimer(lobby) {
+  clearInterval(lobby.clueTimer);
+  lobby.clueTimer = null;
+}
+
+// Kick off everything a live round needs: round-end timer + auto-clue timer.
+function startRound(lobby) {
+  broadcast(lobby);
+  scheduleRoundTimer(lobby);
+  scheduleClueTimer(lobby);
+}
+
 function maybeEndRoundEarly(lobby) {
   if (lobby.phase === PHASES.PLAYING && lobby.allGuessed()) {
     clearTimeout(lobby.timer);
+    stopClueTimer(lobby);
     lobby.endRound();
     return true;
   }
@@ -116,7 +173,8 @@ io.on('connection', (socket) => {
     broadcast(lobby);
   });
 
-  // Host starts the game.
+  // Host moves the lobby into the song-submission phase. Now EVERY player
+  // searches for and submits their own song at the same time.
   socket.on('game:start', ({ settings }, cb) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
@@ -131,20 +189,36 @@ io.on('connection', (socket) => {
     broadcast(lobby);
   });
 
-  // The current chooser locks in a song; the round goes live.
-  socket.on('round:choose', ({ song }, cb) => {
+  // A player submits (or changes) their chosen song + which part to play.
+  socket.on('song:submit', ({ song }, cb) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
-    if (lobby.chooserClientId !== socket.data.clientId) {
-      return cb?.({ ok: false, error: 'Only the chooser can pick the song' });
+    if (lobby.phase !== PHASES.SUBMITTING) {
+      return cb?.({ ok: false, error: 'Not accepting songs right now' });
     }
     if (!song?.title || !song?.audioUrl) {
-      return cb?.({ ok: false, error: 'Song needs a title and an audio URL' });
+      return cb?.({ ok: false, error: 'Pick a song from the search results' });
     }
-    lobby.startRound(song);
+    lobby.submitSong(socket.data.clientId, song);
     cb?.({ ok: true });
     broadcast(lobby);
-    scheduleRoundTimer(lobby);
+  });
+
+  // Host begins playback once enough players have submitted. Each player's
+  // song will play in turn.
+  socket.on('game:begin', (_payload, cb) => {
+    const lobby = manager.get(socket.data.code);
+    if (!lobby) return cb?.({ ok: false });
+    if (lobby.hostClientId !== socket.data.clientId) {
+      return cb?.({ ok: false, error: 'Only the host can begin' });
+    }
+    if (lobby.phase !== PHASES.SUBMITTING) return cb?.({ ok: false });
+    if (lobby.submittedPlayers().length < 2) {
+      return cb?.({ ok: false, error: 'Need at least 2 submitted songs' });
+    }
+    lobby.beginPlayback();
+    cb?.({ ok: true });
+    startRound(lobby);
   });
 
   // A guesser submits a guess.
@@ -154,22 +228,12 @@ io.on('connection', (socket) => {
     const result = lobby.submitGuess(socket.data.clientId, guess);
     cb?.({ ok: true, ...result });
     if (result.correct) {
-      const ended = maybeEndRoundEarly(lobby);
+      maybeEndRoundEarly(lobby);
       broadcast(lobby);
-      if (ended) clearTimeout(lobby.timer);
     }
   });
 
-  // Reveal one more letter as a clue (shared for the round).
-  socket.on('round:clue', (_payload, cb) => {
-    const lobby = manager.get(socket.data.code);
-    if (!lobby) return cb?.({ ok: false });
-    const revealed = lobby.revealClue();
-    cb?.({ ok: true, revealed });
-    if (revealed) broadcast(lobby);
-  });
-
-  // Advance from round-end to the next round (or finish the game).
+  // Advance from round-end to the next song (or finish the game).
   socket.on('round:next', (_payload, cb) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
@@ -178,11 +242,13 @@ io.on('connection', (socket) => {
     }
     if (lobby.isLastRound()) {
       lobby.endGame();
+      cb?.({ ok: true });
+      broadcast(lobby);
     } else {
-      lobby.nextChooser();
+      lobby.nextSong();
+      cb?.({ ok: true });
+      startRound(lobby);
     }
-    cb?.({ ok: true });
-    broadcast(lobby);
   });
 
   // Host returns everyone to the lobby after the game ends (play again).
@@ -190,10 +256,18 @@ io.on('connection', (socket) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
     if (lobby.hostClientId !== socket.data.clientId) return cb?.({ ok: false });
+    clearTimeout(lobby.timer);
+    stopClueTimer(lobby);
     lobby.phase = PHASES.LOBBY;
     lobby.roundNumber = 0;
+    lobby.playOrder = [];
+    lobby.playIndex = -1;
+    lobby.ownerClientId = null;
     lobby.song = null;
-    for (const p of lobby.players.values()) p.score = 0;
+    for (const p of lobby.players.values()) {
+      p.score = 0;
+      p.song = null;
+    }
     cb?.({ ok: true });
     broadcast(lobby);
   });

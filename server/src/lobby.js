@@ -5,16 +5,16 @@ const makeCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 5);
 
 export const PHASES = {
   LOBBY: 'lobby', // waiting in the room
-  SELECTING: 'selecting', // current chooser is picking a song
-  PLAYING: 'playing', // snippet is live, everyone guesses
+  SUBMITTING: 'submitting', // every player searches for & submits their own song
+  PLAYING: 'playing', // one submitted song is live, everyone else guesses
   ROUND_END: 'roundEnd', // reveal answer + scores
   GAME_END: 'gameEnd', // final scoreboard
 };
 
 const DEFAULTS = {
-  roundTimer: 60, // seconds to guess
-  snippetDuration: 15, // seconds of audio played
-  totalRounds: 5,
+  roundTimer: 30, // seconds to guess (a song plays for the whole window)
+  snippetDuration: 30, // seconds of audio played (iTunes previews are ~30s)
+  clueInterval: 10, // reveal one more letter every N seconds, automatically
 };
 
 // Normalize a guess/answer for comparison: lowercase, strip anything that
@@ -30,7 +30,8 @@ function normalize(str) {
 
 // Build a masked version of the answer where letters/digits become "_" but
 // spaces and punctuation stay visible. revealed = set of character indices
-// that have been unlocked via clues.
+// that have been unlocked via clues. This also tells guessers the *length* of
+// the title (number of blanks) at a glance.
 function maskAnswer(answer, revealed) {
   return answer
     .split('')
@@ -52,6 +53,17 @@ function maskableIndices(answer) {
   return out;
 }
 
+// Fisher–Yates shuffle (returns a new array). Used to randomize the order in
+// which players' songs are played so it isn't just join order.
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export class Lobby {
   constructor(code) {
     this.code = code;
@@ -61,16 +73,20 @@ export class Lobby {
     this.settings = { ...DEFAULTS };
 
     this.roundNumber = 0;
-    this.chooserClientId = null;
-    this.chooserOrder = []; // clientIds in the order they take turns choosing
-    this.chooserIndex = -1;
+    // Playback order: clientIds whose submitted songs play, one per round.
+    this.playOrder = [];
+    this.playIndex = -1;
+    // The owner of the song that's currently playing. They already know the
+    // answer, so they sit the round out (can't guess).
+    this.ownerClientId = null;
 
     // Active round state
-    this.song = null; // { title, artist, audioUrl, startTime, duration }
+    this.song = null; // { title, artist, audioUrl, artwork, startTime, duration }
     this.revealed = new Set(); // revealed character indices for clues
     this.roundEndsAt = null;
     this.guessedThisRound = new Set(); // clientIds who already guessed correctly
-    this.timer = null;
+    this.timer = null; // round-end timeout
+    this.clueTimer = null; // auto-clue interval
   }
 
   // ---- player management -------------------------------------------------
@@ -86,9 +102,9 @@ export class Lobby {
         clientId,
         score: 0,
         joinedAt: Date.now(),
+        song: null, // the song this player submitted for the game
       };
       this.players.set(clientId, player);
-      this.chooserOrder.push(clientId);
     }
     player.socketId = socketId;
     player.connected = true;
@@ -130,48 +146,80 @@ export class Lobby {
 
   // ---- game flow ---------------------------------------------------------
 
+  // Host kicks things off: everyone now searches for and submits their own
+  // song simultaneously. Nothing plays yet.
   startGame(settings = {}) {
     this.settings = {
       roundTimer: clampInt(settings.roundTimer, 10, 300, DEFAULTS.roundTimer),
       snippetDuration: clampInt(settings.snippetDuration, 3, 60, DEFAULTS.snippetDuration),
-      totalRounds: clampInt(settings.totalRounds, 1, 20, DEFAULTS.totalRounds),
+      clueInterval: clampInt(settings.clueInterval, 3, 60, DEFAULTS.clueInterval),
     };
-    for (const p of this.players.values()) p.score = 0;
+    for (const p of this.players.values()) {
+      p.score = 0;
+      p.song = null;
+    }
     this.roundNumber = 0;
-    // Lock in turn order from currently-present players.
-    this.chooserOrder = [...this.players.keys()];
-    this.chooserIndex = -1;
-    this.nextChooser();
-  }
-
-  nextChooser() {
-    this.chooserIndex = (this.chooserIndex + 1) % this.chooserOrder.length;
-    this.chooserClientId = this.chooserOrder[this.chooserIndex];
-    this.roundNumber += 1;
-    this.phase = PHASES.SELECTING;
+    this.playOrder = [];
+    this.playIndex = -1;
+    this.ownerClientId = null;
     this.song = null;
-    this.revealed = new Set();
-    this.guessedThisRound = new Set();
-    this.roundEndsAt = null;
+    this.phase = PHASES.SUBMITTING;
   }
 
-  // Chooser locks in a song and the round goes live.
-  startRound(song) {
-    this.song = {
+  // A player picks their song (from search) and which part of it to play.
+  // Stored against the player; they can change it until playback begins.
+  submitSong(clientId, song) {
+    const player = this.players.get(clientId);
+    if (!player) return false;
+    player.song = {
       title: String(song.title || '').slice(0, 120),
       artist: String(song.artist || '').slice(0, 120),
       audioUrl: String(song.audioUrl || '').slice(0, 2000),
+      artwork: String(song.artwork || '').slice(0, 2000),
       startTime: clampInt(song.startTime, 0, 100000, 0),
       duration: clampInt(song.duration, 3, 60, this.settings.snippetDuration),
     };
+    return true;
+  }
+
+  // Connected players who have a valid submission ready.
+  submittedPlayers() {
+    return [...this.players.values()].filter(
+      (p) => p.connected && p.song && p.song.title && p.song.audioUrl
+    );
+  }
+
+  // True once every connected player has submitted a song.
+  allSubmitted() {
+    const connected = [...this.players.values()].filter((p) => p.connected);
+    return connected.length > 0 && connected.every((p) => p.song && p.song.title && p.song.audioUrl);
+  }
+
+  // Host begins playback. Lock in the play order from everyone who submitted.
+  beginPlayback() {
+    const ready = this.submittedPlayers();
+    this.playOrder = shuffle(ready.map((p) => p.clientId));
+    this.playIndex = -1;
+    return this.nextSong();
+  }
+
+  // Advance to the next player's song (the next round).
+  nextSong() {
+    this.playIndex += 1;
+    this.ownerClientId = this.playOrder[this.playIndex];
+    const owner = this.players.get(this.ownerClientId);
+    this.song = owner ? owner.song : null;
+    this.roundNumber = this.playIndex + 1;
     this.phase = PHASES.PLAYING;
     this.revealed = new Set();
     this.guessedThisRound = new Set();
     this.roundEndsAt = Date.now() + this.settings.roundTimer * 1000;
+    return this.song;
   }
 
   // Reveal one more random letter as a clue. Returns true if a new letter was
-  // revealed. Shared across guessers for the round.
+  // revealed. Driven automatically by a timer (every clueInterval seconds);
+  // never reveals the final hidden letter.
   revealClue() {
     if (!this.song) return false;
     const candidates = maskableIndices(this.song.title).filter((i) => !this.revealed.has(i));
@@ -184,7 +232,7 @@ export class Lobby {
   // Check a player's guess. Returns { correct, points } and updates score.
   submitGuess(clientId, guess) {
     if (this.phase !== PHASES.PLAYING || !this.song) return { correct: false };
-    if (clientId === this.chooserClientId) return { correct: false, reason: 'chooser' };
+    if (clientId === this.ownerClientId) return { correct: false, reason: 'owner' };
     if (this.guessedThisRound.has(clientId)) return { correct: false, reason: 'already' };
 
     if (normalize(guess) !== normalize(this.song.title)) {
@@ -193,17 +241,18 @@ export class Lobby {
 
     const player = this.players.get(clientId);
     const secondsLeft = Math.max(0, Math.round((this.roundEndsAt - Date.now()) / 1000));
-    const cluePenalty = this.revealed.size * 15;
-    const points = Math.max(20, 100 + secondsLeft - cluePenalty);
+    // Faster guesses score higher; clues are automatic & shared so there's no
+    // per-player clue penalty.
+    const points = Math.max(20, Math.round(20 + 80 * (secondsLeft / this.settings.roundTimer)));
     player.score += points;
     this.guessedThisRound.add(clientId);
     return { correct: true, points };
   }
 
-  // Everyone (except chooser) guessed? Then the round can end early.
+  // Everyone (except the song's owner) guessed? Then the round can end early.
   allGuessed() {
     const guessers = [...this.players.values()].filter(
-      (p) => p.connected && p.clientId !== this.chooserClientId
+      (p) => p.connected && p.clientId !== this.ownerClientId
     );
     if (guessers.length === 0) return false;
     return guessers.every((p) => this.guessedThisRound.has(p.clientId));
@@ -214,8 +263,9 @@ export class Lobby {
     this.roundEndsAt = null;
   }
 
+  // The game ends once every submitted song has been played.
   isLastRound() {
-    return this.roundNumber >= this.settings.totalRounds;
+    return this.playIndex >= this.playOrder.length - 1;
   }
 
   endGame() {
@@ -225,7 +275,7 @@ export class Lobby {
   // ---- serialization -----------------------------------------------------
 
   // What every client is allowed to see. The answer title is hidden during
-  // play (only the masked version + audio config is shared); the chooser gets
+  // play (only the masked version + audio config is shared); the owner gets
   // the full answer separately.
   publicState() {
     const players = [...this.players.values()]
@@ -236,7 +286,8 @@ export class Lobby {
         score: p.score,
         connected: p.connected,
         isHost: p.clientId === this.hostClientId,
-        isChooser: p.clientId === this.chooserClientId,
+        isChooser: p.clientId === this.ownerClientId, // owner of the live song
+        hasSubmitted: !!(p.song && p.song.title && p.song.audioUrl),
         hasGuessed: this.guessedThisRound.has(p.clientId),
       }))
       .sort((a, b) => b.score - a.score);
@@ -246,20 +297,26 @@ export class Lobby {
       phase: this.phase,
       settings: this.settings,
       roundNumber: this.roundNumber,
-      totalRounds: this.settings.totalRounds,
+      totalRounds: this.phase === PHASES.SUBMITTING
+        ? players.filter((p) => p.connected).length
+        : this.playOrder.length,
       hostClientId: this.hostClientId,
-      chooserClientId: this.chooserClientId,
+      chooserClientId: this.ownerClientId,
       players,
       roundEndsAt: this.roundEndsAt,
     };
 
     if ((this.phase === PHASES.PLAYING || this.phase === PHASES.ROUND_END) && this.song) {
+      const owner = this.players.get(this.ownerClientId);
       state.round = {
         masked: maskAnswer(this.song.title, this.revealed),
+        titleLength: this.song.title.length,
         cluesUsed: this.revealed.size,
         artistHint: this.song.artist || null,
+        ownerName: owner?.username || 'Someone',
         audio: {
           url: this.song.audioUrl,
+          artwork: this.song.artwork || null,
           startTime: this.song.startTime,
           duration: this.song.duration,
         },
