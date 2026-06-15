@@ -314,6 +314,34 @@ io.on('connection', (socket) => {
     broadcast(lobby);
   });
 
+  // Deliberately leave the lobby (via the in-app "Leave lobby" button). Unlike
+  // a transient disconnect, this fully removes the player before the game is
+  // running; mid-game we just mark them gone so the play order stays intact.
+  socket.on('lobby:leave', (_payload, cb) => {
+    const lobby = manager.get(socket.data.code);
+    if (lobby) {
+      const clientId = socket.data.clientId;
+      const inGame = lobby.phase === PHASES.PLAYING || lobby.phase === PHASES.ROUND_END;
+      if (inGame) {
+        lobby.markDisconnected(socket.id);
+      } else {
+        lobby.players.delete(clientId);
+        lobby.playOrder = lobby.playOrder.filter((id) => id !== clientId);
+      }
+      lobby.reassignHostIfNeeded();
+      socket.leave(lobby.code);
+      broadcast(lobby);
+      if (lobby.isEmpty()) {
+        setTimeout(() => {
+          if (lobby.isEmpty()) manager.remove(lobby.code);
+        }, 60 * 1000);
+      }
+    }
+    socket.data.code = null;
+    socket.data.clientId = null;
+    cb?.({ ok: true });
+  });
+
   socket.on('disconnect', () => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return;

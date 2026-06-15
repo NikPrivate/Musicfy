@@ -1,20 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { socket, emit } from '../socket.js';
 import { getClientId, getProfile, saveProfile, hasProfile } from '../identity.js';
 import ProfileSetup from '../components/ProfileSetup.jsx';
 import PlayerList from '../components/PlayerList.jsx';
 import SongSearch from '../components/SongSearch.jsx';
 import SnippetPlayer from '../components/SnippetPlayer.jsx';
+import Avatar from '../components/Avatar.jsx';
 
 export default function Room() {
   const { code } = useParams();
+  const navigate = useNavigate();
   const clientId = getClientId();
 
   const [state, setState] = useState(null); // public lobby state
   const [joined, setJoined] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [joinError, setJoinError] = useState(''); // e.g. "Lobby is full"
+  const [showLeave, setShowLeave] = useState(false); // leave-confirmation modal
   // needProfile drives whether we show the setup screen. If the user already
   // has a saved profile we skip it and auto-join — so re-clicking the share
   // link never spawns a duplicate player.
@@ -76,6 +79,27 @@ export default function Room() {
     doJoin(profile);
   }
 
+  // Block the browser Back button while in a lobby: re-push our entry so the
+  // navigation is cancelled, and instead prompt the player to leave explicitly.
+  // They can only exit via the "Leave lobby" button.
+  useEffect(() => {
+    if (!joined) return;
+    window.history.pushState(null, '', window.location.href);
+    function onPopState() {
+      window.history.pushState(null, '', window.location.href);
+      setShowLeave(true);
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [joined]);
+
+  // Actually leave: tell the server to drop us, then go home.
+  function leaveLobby() {
+    emit('lobby:leave');
+    setShowLeave(false);
+    navigate('/');
+  }
+
   if (notFound) {
     return (
       <div className="card centered">
@@ -115,7 +139,23 @@ export default function Room() {
 
   return (
     <div className="room">
-      <ShareBar code={code} />
+      <ShareBar code={code} onLeave={() => setShowLeave(true)} />
+
+      {showLeave && (
+        <div className="modal-overlay" onClick={() => setShowLeave(false)}>
+          <div className="modal card" onClick={(e) => e.stopPropagation()}>
+            <h3>Leave the lobby?</h3>
+            <p className="muted">
+              You'll exit the game{isHost ? ' (the host role passes to someone else)' : ''}.
+              You can rejoin from the invite link later.
+            </p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setShowLeave(false)}>Stay</button>
+              <button className="btn btn--primary" onClick={leaveLobby}>Leave</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="room-grid">
         <aside className="card sidebar">
@@ -151,7 +191,7 @@ export default function Room() {
 
 // ---- Share bar -----------------------------------------------------------
 
-function ShareBar({ code }) {
+function ShareBar({ code, onLeave }) {
   const [copied, setCopied] = useState(false);
   const link = `${window.location.origin}/lobby/${code}`;
 
@@ -179,9 +219,16 @@ function ShareBar({ code }) {
         <span className="muted">Lobby code</span>
         <strong className="code">{code}</strong>
       </div>
-      <button className="btn btn--primary" onClick={share}>
-        {copied ? '✓ Link copied!' : '🔗 Share invite link'}
-      </button>
+      <div className="share-bar-actions">
+        <button className="btn btn--primary" onClick={share}>
+          {copied ? '✓ Link copied!' : '🔗 Share invite link'}
+        </button>
+        {onLeave && (
+          <button className="btn btn--ghost" onClick={onLeave}>
+            🚪 Leave lobby
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -456,26 +503,114 @@ function RoundEndStage({ state, isHost }) {
 
 // ---- Game end ------------------------------------------------------------
 
-function GameEndStage({ state, isHost }) {
-  const winner = state.players[0];
+function GameEndStage({ state, isHost, clientId }) {
+  const players = state.players; // already sorted high → low
+  const winner = players[0];
+  const top3 = players.slice(0, 3);
+  const yourRank = players.findIndex((p) => p.clientId === clientId) + 1;
+  const [showScores, setShowScores] = useState(false);
+
   async function again() {
     await emit('game:reset');
   }
+
   return (
-    <div className="card centered">
-      <h2>🏆 Game over!</h2>
-      {winner && (
-        <p className="winner">
-          Winner: <strong>{winner.username}</strong> with {winner.score} points!
-        </p>
-      )}
-      <h3>Final scoreboard</h3>
-      <PlayerList players={state.players} youId={null} />
-      {isHost ? (
-        <button className="btn btn--primary btn--big" onClick={again}>Play again 🔁</button>
-      ) : (
-        <p className="muted">Waiting for the host to start a new game…</p>
-      )}
+    <div className="gameover-overlay">
+      <Confetti />
+      <div className="gameover card">
+        <div className="trophy">🏆</div>
+        <h2 className="gameover-title">Game over!</h2>
+        {winner && (
+          <p className="winner-line">
+            <Avatar value={winner.avatar} size={26} />
+            <strong>{winner.username}</strong> wins with {winner.score} pts!
+          </p>
+        )}
+
+        <Podium top3={top3} youId={clientId} />
+
+        {yourRank > 0 && (
+          <p className="your-rank">
+            You finished <strong>#{yourRank}</strong> of {players.length}
+          </p>
+        )}
+
+        <button className="link-btn" onClick={() => setShowScores((s) => !s)}>
+          {showScores ? 'Hide full scoreboard' : 'Show full scoreboard'}
+        </button>
+        {showScores && (
+          <div className="gameover-scores">
+            <PlayerList players={players} youId={clientId} />
+          </div>
+        )}
+
+        {isHost ? (
+          <button className="btn btn--primary btn--big" onClick={again}>Play again 🔁</button>
+        ) : (
+          <p className="muted">Waiting for the host to start a new game…</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Top-3 podium: 2nd on the left, 1st (tallest) in the middle, 3rd on the right.
+function Podium({ top3, youId }) {
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const rankClass = { 1: 'first', 2: 'second', 3: 'third' };
+  // Display order puts the winner centre-stage.
+  const display = [top3[1], top3[0], top3[2]]
+    .map((p) => (p ? { p, rank: top3.indexOf(p) + 1 } : null))
+    .filter(Boolean);
+
+  return (
+    <div className="podium">
+      {display.map(({ p, rank }) => (
+        <div key={p.clientId} className={`podium-spot ${rankClass[rank]}`}>
+          <span className="podium-medal">{medals[rank]}</span>
+          <Avatar value={p.avatar} size={44} />
+          <span className="podium-name">
+            {p.username}
+            {p.clientId === youId && <em className="you-tag"> (you)</em>}
+          </span>
+          <span className="podium-score">{p.score} pts</span>
+          <div className="podium-bar">{rank}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Lightweight CSS-only confetti burst (no dependencies).
+function Confetti() {
+  const pieces = useMemo(() => {
+    const colors = ['#1db954', '#1ed760', '#ffd966', '#ff6b6b', '#4cc9f0', '#ffffff'];
+    return Array.from({ length: 70 }, (_, i) => ({
+      left: Math.random() * 100,
+      delay: Math.random() * 2.5,
+      duration: 2.6 + Math.random() * 2.4,
+      bg: colors[i % colors.length],
+      size: 6 + Math.random() * 7,
+      rot: Math.random() * 360,
+    }));
+  }, []);
+  return (
+    <div className="confetti" aria-hidden="true">
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          className="confetti-piece"
+          style={{
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.size,
+            background: p.bg,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.duration}s`,
+            transform: `rotate(${p.rot}deg)`,
+          }}
+        />
+      ))}
     </div>
   );
 }
