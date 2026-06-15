@@ -5,7 +5,13 @@ import Avatar from './Avatar.jsx';
 // Shown only when a returning visitor has NO saved profile yet. Once they set
 // one it's persisted, so clicking the share link again skips this entirely
 // (preventing duplicate players for the same person).
-export default function ProfileSetup({ initial, onSubmit }) {
+export default function ProfileSetup({
+  initial,
+  onSubmit,
+  title = 'Pick your identity',
+  subtitle = 'This is how your friends will see you in the lobby.',
+  submitLabel = 'Join the lobby →',
+}) {
   const [username, setUsername] = useState(initial?.username || '');
   // Only emoji avatars are offered. If an older saved profile used an image
   // URL, fall back to the first emoji.
@@ -22,8 +28,8 @@ export default function ProfileSetup({ initial, onSubmit }) {
 
   return (
     <div className="card profile-setup">
-      <h2>Pick your identity</h2>
-      <p className="muted">This is how your friends will see you in the lobby.</p>
+      <h2>{title}</h2>
+      <p className="muted">{subtitle}</p>
       <form onSubmit={submit}>
         <label className="field">
           <span>Username</span>
@@ -58,7 +64,7 @@ export default function ProfileSetup({ initial, onSubmit }) {
         </div>
 
         <button className="btn btn--primary" type="submit" disabled={!username.trim()}>
-          Join the lobby →
+          {submitLabel}
         </button>
       </form>
     </div>

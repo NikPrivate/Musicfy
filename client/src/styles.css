@@ -105,8 +105,11 @@ input:focus { outline: 2px solid var(--primary); }
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
   display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px;
 }
-.modal { max-width: 420px; width: 100%; margin: 0; }
+.modal { max-width: 440px; width: 100%; margin: 0; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+.modal-secondary { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; padding: 0 4px; }
+.link-btn--danger { color: var(--bad); }
+.link-btn--danger:hover { color: #ff9aa2; }
 
 /* Room layout */
 .room-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }

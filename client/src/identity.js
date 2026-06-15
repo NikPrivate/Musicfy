@@ -39,3 +39,10 @@ export function hasProfile() {
   const p = getProfile();
   return !!(p && p.username);
 }
+
+// Wipe identity entirely (clientId + profile) so the next visit is treated as a
+// brand-new user. Used by "Reset identity & start fresh".
+export function clearIdentity() {
+  localStorage.removeItem(CLIENT_ID_KEY);
+  localStorage.removeItem(PROFILE_KEY);
+}

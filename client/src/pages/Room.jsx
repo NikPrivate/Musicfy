@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket, emit } from '../socket.js';
-import { getClientId, getProfile, saveProfile, hasProfile } from '../identity.js';
+import { getClientId, getProfile, saveProfile, hasProfile, clearIdentity } from '../identity.js';
 import ProfileSetup from '../components/ProfileSetup.jsx';
 import PlayerList from '../components/PlayerList.jsx';
 import SongSearch from '../components/SongSearch.jsx';
@@ -18,6 +18,7 @@ export default function Room() {
   const [notFound, setNotFound] = useState(false);
   const [joinError, setJoinError] = useState(''); // e.g. "Lobby is full"
   const [showLeave, setShowLeave] = useState(false); // leave-confirmation modal
+  const [showEdit, setShowEdit] = useState(false); // edit name/avatar modal
   // needProfile drives whether we show the setup screen. If the user already
   // has a saved profile we skip it and auto-join — so re-clicking the share
   // link never spawns a duplicate player.
@@ -100,6 +101,20 @@ export default function Room() {
     navigate('/');
   }
 
+  // Save edited name/avatar: persist locally and push the change to everyone.
+  function handleEditSubmit(profile) {
+    saveProfile(profile);
+    emit('profile:update', { profile });
+    setShowEdit(false);
+  }
+
+  // Start over as a brand-new user: leave, wipe identity, reload home.
+  async function resetIdentity() {
+    await emit('lobby:leave');
+    clearIdentity();
+    window.location.href = '/';
+  }
+
   if (notFound) {
     return (
       <div className="card centered">
@@ -139,7 +154,31 @@ export default function Room() {
 
   return (
     <div className="room">
-      <ShareBar code={code} onLeave={() => setShowLeave(true)} />
+      <ShareBar
+        code={code}
+        onEdit={() => setShowEdit(true)}
+        onLeave={() => setShowLeave(true)}
+      />
+
+      {showEdit && (
+        <div className="modal-overlay" onClick={() => setShowEdit(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <ProfileSetup
+              initial={getProfile()}
+              title="Edit your profile"
+              subtitle="Change how everyone sees you. Updates instantly for the whole lobby."
+              submitLabel="Save changes ✓"
+              onSubmit={handleEditSubmit}
+            />
+            <div className="modal-secondary">
+              <button className="link-btn" onClick={() => setShowEdit(false)}>Cancel</button>
+              <button className="link-btn link-btn--danger" onClick={resetIdentity}>
+                Reset identity & start fresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showLeave && (
         <div className="modal-overlay" onClick={() => setShowLeave(false)}>
@@ -191,7 +230,7 @@ export default function Room() {
 
 // ---- Share bar -----------------------------------------------------------
 
-function ShareBar({ code, onLeave }) {
+function ShareBar({ code, onLeave, onEdit }) {
   const [copied, setCopied] = useState(false);
   const link = `${window.location.origin}/lobby/${code}`;
 
@@ -223,6 +262,11 @@ function ShareBar({ code, onLeave }) {
         <button className="btn btn--primary" onClick={share}>
           {copied ? '✓ Link copied!' : '🔗 Share invite link'}
         </button>
+        {onEdit && (
+          <button className="btn btn--ghost" onClick={onEdit}>
+            ✏️ Edit profile
+          </button>
+        )}
         {onLeave && (
           <button className="btn btn--ghost" onClick={onLeave}>
             🚪 Leave lobby
