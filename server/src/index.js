@@ -28,36 +28,83 @@ app.get('/api/lobby/:code', (req, res) => {
   res.json({ code: lobby.code, phase: lobby.phase, players: lobby.players.size });
 });
 
-// Audius: free, key-less streaming of FULL tracks. The stream endpoint serves
-// the whole MP3 with HTTP range support, so the player can seek to *any* point
-// — that's what lets users pick any part of the song. Catalog leans indie /
-// electronic / hip-hop, so we pair it with iTunes for mainstream coverage.
-const AUDIUS = 'https://api.audius.co/v1';
-const APP = 'Musicfy';
+// Normalize for fuzzy comparison: lowercase, strip accents/punctuation,
+// collapse whitespace. "Beyoncé - Déjà Vu!" -> "beyonce deja vu".
+function normalize(s) {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-async function searchAudius(q) {
-  const url = `${AUDIUS}/tracks/search?query=${encodeURIComponent(q)}&app_name=${APP}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Audius ${r.status}`);
-  const data = await r.json();
-  return (data.data || [])
-    .filter((t) => t.is_streamable !== false && t.duration > 0)
-    .slice(0, 5)
-    .map((t) => ({
-      id: `audius:${t.id}`,
-      source: 'audius',
-      full: true, // whole track — any segment is fair game
-      title: t.title,
-      artist: t.user?.name || 'Unknown artist',
-      artwork: t.artwork?.['480x480'] || t.artwork?.['150x150'] || '',
-      audioUrl: `${AUDIUS}/tracks/${t.id}/stream?app_name=${APP}`,
-      length: t.duration, // full track length in seconds
-    }));
+// Levenshtein edit distance, used to catch small typos ("imagin" -> "imagine").
+function editDistance(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let curr = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+// How closely two strings match, 0 (nothing) .. 1 (identical). Combines
+// exact/prefix/substring checks with a typo-tolerant edit-distance fallback.
+function similarity(query, target) {
+  if (!query || !target) return 0;
+  if (query === target) return 1;
+  if (target.startsWith(query)) return 0.95;
+  if (target.includes(query)) return 0.85;
+  const dist = editDistance(query, target);
+  const longer = Math.max(query.length, target.length);
+  return longer ? Math.max(0, 1 - dist / longer) : 0;
+}
+
+// Relevance score for a track against the typed query. Looks at the full
+// "title artist" string, the title and artist on their own, and matches each
+// query word against each target word so partial/out-of-order typing still
+// surfaces the obvious song.
+function scoreMatch(q, title, artist) {
+  const query = normalize(q);
+  const nTitle = normalize(title);
+  const nArtist = normalize(artist);
+  const combined = `${nTitle} ${nArtist}`.trim();
+
+  let score = Math.max(
+    similarity(query, nTitle),
+    similarity(query, nArtist),
+    similarity(query, combined) * 0.9,
+  );
+
+  // Per-word matching: every query word should find a close target word.
+  const qWords = query.split(' ').filter(Boolean);
+  const tWords = combined.split(' ').filter(Boolean);
+  if (qWords.length && tWords.length) {
+    const wordScore =
+      qWords.reduce(
+        (sum, qw) => sum + Math.max(...tWords.map((tw) => similarity(qw, tw))),
+        0,
+      ) / qWords.length;
+    score = Math.max(score, wordScore * 0.95);
+  }
+
+  return score;
 }
 
 async function searchItunes(q) {
+  // Pull a wide pool (one call, no extra requests) so re-ranking has enough
+  // candidates to surface the right track even from a rough query.
   const url =
-    'https://itunes.apple.com/search?media=music&entity=song&limit=6&term=' +
+    'https://itunes.apple.com/search?media=music&entity=song&limit=50&term=' +
     encodeURIComponent(q);
   const r = await fetch(url, { headers: { 'User-Agent': 'Musicfy/1.0' } });
   if (!r.ok) throw new Error(`iTunes ${r.status}`);
@@ -73,7 +120,11 @@ async function searchItunes(q) {
       artwork: (t.artworkUrl100 || '').replace('100x100', '200x200'),
       audioUrl: t.previewUrl,
       length: 30,
-    }));
+      _score: scoreMatch(q, t.trackName, t.artistName),
+    }))
+    .sort((a, b) => b._score - a._score) // closest matches first
+    .slice(0, 12) // popup scrolls, so show a deeper ranked list
+    .map(({ _score, ...rest }) => rest);
 }
 
 // Song search proxy. The browser calls this as the player types. We query
@@ -82,17 +133,13 @@ async function searchItunes(q) {
 app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').toString().trim();
   if (!q) return res.json({ results: [] });
-  const [audius, itunes] = await Promise.allSettled([searchAudius(q), searchItunes(q)]);
-  if (audius.status === 'rejected') console.error('Audius search failed:', audius.reason?.message);
-  if (itunes.status === 'rejected') console.error('iTunes search failed:', itunes.reason?.message);
-  const results = [
-    ...(audius.status === 'fulfilled' ? audius.value : []),
-    ...(itunes.status === 'fulfilled' ? itunes.value : []),
-  ];
-  if (!results.length && audius.status === 'rejected' && itunes.status === 'rejected') {
-    return res.status(502).json({ results: [], error: 'Search unavailable' });
+  try {
+    const results = await searchItunes(q);
+    res.json({ results });
+  } catch (err) {
+    console.error('iTunes search failed:', err.message);
+    res.status(502).json({ results: [], error: 'Search unavailable' });
   }
-  res.json({ results });
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -302,11 +349,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Host returns everyone to the lobby after the game ends (play again).
+  // Only the host sends everyone back to the lobby after the game ends (play
+  // again) — otherwise one player clicking would yank the game-over screen out
+  // from under everyone else. It only does anything once the game has ended.
   socket.on('game:reset', (_payload, cb) => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return cb?.({ ok: false });
-    if (lobby.hostClientId !== socket.data.clientId) return cb?.({ ok: false });
+    if (socket.data.clientId !== lobby.hostClientId) return cb?.({ ok: false });
+    if (lobby.phase !== PHASES.GAME_END) return cb?.({ ok: false });
     clearTimeout(lobby.timer);
     stopClueTimer(lobby);
     lobby.phase = PHASES.LOBBY;

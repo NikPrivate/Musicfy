@@ -33,6 +33,21 @@ function normalize(str) {
     .trim();
 }
 
+// The part of a title players actually have to guess. Anything inside brackets
+// or parentheses — "(feat. Bruno Mars)", "[Remastered 2011]", "{Live}" — is
+// stripped along with the brackets themselves: it isn't the core title and just
+// makes the blanks longer and the guess harder (and often leaks the artist).
+// So "Lighters (feat. Bruno Mars)" becomes "Lighters".
+function guessableTitle(title) {
+  const stripped = (title || '')
+    .replace(/[([{][^)\]}]*[)\]}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // If the title was *all* brackets (e.g. "(Instrumental)"), keep the original
+  // so there's still something to guess.
+  return stripped || (title || '').trim();
+}
+
 // Build a masked version of the answer where letters/digits become "_" but
 // spaces and punctuation stay visible. revealed = set of character indices
 // that have been unlocked via clues. This also tells guessers the *length* of
@@ -248,7 +263,7 @@ export class Lobby {
   // never reveals the final hidden letter.
   revealClue() {
     if (!this.song) return false;
-    const candidates = maskableIndices(this.song.title).filter((i) => !this.revealed.has(i));
+    const candidates = maskableIndices(guessableTitle(this.song.title)).filter((i) => !this.revealed.has(i));
     if (candidates.length <= 1) return false; // never fully reveal via clues
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     this.revealed.add(pick);
@@ -261,7 +276,11 @@ export class Lobby {
     if (clientId === this.ownerClientId) return { correct: false, reason: 'owner' };
     if (this.guessedThisRound.has(clientId)) return { correct: false, reason: 'already' };
 
-    if (normalize(guess) !== normalize(this.song.title)) {
+    // Accept either the core title ("Lighters") or the full one ("Lighters
+    // (feat. Bruno Mars)") — the blanks only show the core, but typing the whole
+    // thing shouldn't be marked wrong.
+    const g = normalize(guess);
+    if (g !== normalize(guessableTitle(this.song.title)) && g !== normalize(this.song.title)) {
       return { correct: false };
     }
 
@@ -335,9 +354,10 @@ export class Lobby {
 
     if ((this.phase === PHASES.PLAYING || this.phase === PHASES.ROUND_END) && this.song) {
       const owner = this.players.get(this.ownerClientId);
+      const guessTitle = guessableTitle(this.song.title);
       state.round = {
-        masked: maskAnswer(this.song.title, this.revealed),
-        titleLength: this.song.title.length,
+        masked: maskAnswer(guessTitle, this.revealed),
+        titleLength: guessTitle.length,
         cluesUsed: this.revealed.size,
         artistHint: this.song.artist || null,
         ownerName: owner?.username || 'Someone',

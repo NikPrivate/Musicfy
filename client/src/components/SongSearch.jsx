@@ -1,75 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Music2, CheckCircle2, X, Search, Loader2, RefreshCw } from 'lucide-react';
 import { emit } from '../socket.js';
 import SnippetPlayer from './SnippetPlayer.jsx';
 
-// Every player uses this during the submission phase: type a song name, pick
-// from live suggestions (iTunes), then choose *which part* of the ~30s preview
-// to play. The twist of the game lives here — you control the snippet.
 export default function SongSearch({ defaultDuration = 15, alreadySubmitted = false }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [selected, setSelected] = useState(null); // a search result
-  const [startTime, setStartTime] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  // What we last locked in (for the confirmation card). Null after a reconnect
-  // since the choice isn't persisted client-side — we fall back to a generic
-  // "locked in" card using the server's hasSubmitted flag.
   const [mySong, setMySong] = useState(null);
   const [editing, setEditing] = useState(!alreadySubmitted);
 
-  const debounce = useRef(null);
-  const skipSearch = useRef(false);
-  // How much audio we can choose from: a full Audius track (its whole length)
-  // or a 30s iTunes preview. The snippet length is FIXED — players only pick
-  // the start point (which part of the song to play).
-  const trackLength = selected?.length || 30;
-  const duration = Math.min(defaultDuration, trackLength, 60);
-  const maxStart = Math.max(0, trackLength - duration);
-
-  // Debounced live search as the player types.
-  useEffect(() => {
-    // Picking a song auto-fills the box with the title — don't treat that as a
-    // new search (it would re-open the suggestions list we just closed).
-    if (skipSearch.current) {
-      skipSearch.current = false;
-      return;
-    }
-    clearTimeout(debounce.current);
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    debounce.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-        const data = await r.json();
-        setResults(data.results || []);
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(debounce.current);
-  }, [query]);
+  const duration = Math.min(defaultDuration, 30);
 
   function pick(result) {
-    skipSearch.current = true; // suppress the re-search the title auto-fill triggers
     setSelected(result);
-    setResults([]);
-    setSearching(false);
-    setQuery(`${result.title} — ${result.artist}`);
+    setPickerOpen(false);
     setStartTime(0);
     setError('');
   }
 
   async function submit() {
-    if (!selected) return setError('Pick a song from the suggestions first.');
+    if (!selected) return setError('Pick a song first.');
     setBusy(true);
     setError('');
     const res = await emit('song:submit', {
@@ -78,7 +31,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
         artist: selected.artist,
         audioUrl: selected.audioUrl,
         artwork: selected.artwork,
-        startTime: Math.min(startTime, maxStart),
+        startTime: 0,
         duration,
       },
     });
@@ -88,7 +41,7 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
         title: selected.title,
         artist: selected.artist,
         artwork: selected.artwork,
-        startTime: Math.min(startTime, maxStart),
+        startTime: 0,
         duration,
       });
       setEditing(false);
@@ -97,11 +50,13 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
     }
   }
 
-  // Already submitted and not editing → compact confirmation card.
   if ((mySong || alreadySubmitted) && !editing) {
     return (
       <div className="card song-search">
-        <h2>✅ Song locked in</h2>
+        <h2 className="song-search-title">
+          <CheckCircle2 size={22} className="icon-green" />
+          Song locked in
+        </h2>
         {mySong ? (
           <div className="picked-song">
             {mySong.artwork && <img src={mySong.artwork} alt="" className="art" />}
@@ -117,99 +72,148 @@ export default function SongSearch({ defaultDuration = 15, alreadySubmitted = fa
           <p className="muted">You've already picked a song for this game.</p>
         )}
         <p className="muted">Waiting for everyone else to pick…</p>
-        <button className="btn" onClick={() => setEditing(true)}>Change my song</button>
+        <button className="btn" onClick={() => setEditing(true)}>
+          <RefreshCw size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+          Change my song
+        </button>
       </div>
     );
   }
 
   return (
     <div className="card song-search">
-      <h2>🎶 Pick your song</h2>
+      <h2 className="song-search-title">
+        <Music2 size={22} className="icon-primary" />
+        Pick your song
+      </h2>
       <p className="muted">
-        Search for a track, choose it, then drag to pick the exact part everyone
-        will have to guess. No one sees your choice.
+        Search for a track, choose it, then drag to pick the exact part everyone will have to guess. No one sees your choice.
       </p>
 
-      <label className="field">
-        <span>Search for a song</span>
-        <input
-          autoFocus
-          placeholder="e.g. Bohemian Rhapsody"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setSelected(null);
-          }}
-        />
-      </label>
-
-      {searching && !selected && <p className="muted">Searching…</p>}
-
-      {!selected && results.length > 0 && (
-        <ul className="suggestions">
-          {results.map((r) => (
-            <li key={r.id} className="suggestion" onClick={() => pick(r)}>
-              {r.artwork && <img src={r.artwork} alt="" className="art-sm" />}
-              <span className="suggestion-text">
-                <strong>{r.title}</strong>
-                <span className="muted"> · {r.artist}</span>
-              </span>
-              <span className={`src-badge ${r.full ? 'src-full' : 'src-clip'}`}>
-                {r.full ? 'full track' : '30s clip'}
-              </span>
-            </li>
-          ))}
-        </ul>
+      {selected ? (
+        <button className="btn song-trigger song-trigger--selected" onClick={() => setPickerOpen(true)}>
+          {selected.artwork && <img src={selected.artwork} alt="" className="art-sm" />}
+          <span className="song-trigger-text">
+            <strong>{selected.title}</strong>
+            <span className="muted"> · {selected.artist}</span>
+          </span>
+          <Search size={15} className="song-trigger-icon" />
+        </button>
+      ) : (
+        <button className="btn song-trigger" onClick={() => setPickerOpen(true)}>
+          <Search size={15} className="song-trigger-icon-left" />
+          Search for a song…
+        </button>
       )}
 
       {selected && (
         <div className="chosen">
-          <div className="picked-song">
-            {selected.artwork && <img src={selected.artwork} alt="" className="art" />}
-            <div>
-              <strong>{selected.title}</strong>
-              <div className="muted">{selected.artist}</div>
-            </div>
-          </div>
-
-          <p className="muted">
-            {selected.full
-              ? `Full track (${formatTime(trackLength)}) — pick any part:`
-              : "Preview the part you'll make them guess:"}
-          </p>
+          <p className="muted">Preview the {duration}s clip your friends will have to guess:</p>
           <SnippetPlayer
             url={selected.audioUrl}
-            startTime={Math.min(startTime, maxStart)}
+            startTime={0}
             duration={duration}
           />
 
-          {maxStart > 0 ? (
-            <label className="field">
-              <span>
-                Start at: {formatTime(Math.min(startTime, maxStart))} / {formatTime(trackLength)}
-                {' '}· plays {duration}s
-              </span>
-              <input
-                type="range"
-                min="0"
-                max={maxStart}
-                step="1"
-                value={Math.min(startTime, maxStart)}
-                onChange={(e) => setStartTime(Number(e.target.value))}
-              />
-            </label>
-          ) : (
-            <p className="muted">Plays the full {duration}s clip from the start.</p>
-          )}
-
           {error && <p className="error">{error}</p>}
           <button className="btn btn--primary" onClick={submit} disabled={busy}>
-            {busy ? 'Submitting…' : mySong || alreadySubmitted ? 'Update my song ✓' : 'Lock in my song ✓'}
+            {busy ? 'Submitting…' : mySong || alreadySubmitted ? 'Update my song' : 'Lock in my song'}
           </button>
         </div>
       )}
 
       {!selected && error && <p className="error">{error}</p>}
+
+      {pickerOpen && createPortal(
+        <SongPicker onPick={pick} onClose={() => setPickerOpen(false)} />,
+        document.body
+      )}
+    </div>
+  );
+}
+
+// ---- Song picker popup -------------------------------------------------------
+
+function SongPicker({ onPick, onClose }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const debounce = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    clearTimeout(debounce.current);
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounce.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const data = await r.json();
+        setResults(data.results || []);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(debounce.current);
+  }, [query]);
+
+  function handleKey(e) {
+    if (e.key === 'Escape') onClose();
+  }
+
+  return (
+    <div className="song-picker-overlay" onClick={onClose}>
+      <div className="song-picker" onClick={(e) => e.stopPropagation()} onKeyDown={handleKey}>
+        <div className="song-picker-header">
+          <div className="search-input-wrap" style={{ flex: 1 }}>
+            <Search size={16} className="search-icon" />
+            <input
+              ref={inputRef}
+              className="search-input"
+              placeholder="Search for a song…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {searching && <Loader2 size={16} className="search-spinner spin" />}
+          </div>
+          <button className="song-picker-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        {results.length > 0 ? (
+          <ul className="song-picker-list">
+            {results.map((r) => (
+              <li key={r.id} className="suggestion" onClick={() => onPick(r)}>
+                {r.artwork
+                  ? <img src={r.artwork} alt="" className="art-sm" />
+                  : <div className="art-sm art-placeholder"><Music2 size={18} /></div>
+                }
+                <span className="suggestion-text">
+                  <strong>{r.title}</strong>
+                  <span className="muted"> · {r.artist}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="song-picker-empty">
+            {query.length < 2
+              ? <><Search size={32} className="empty-icon" /><p>Start typing to search…</p></>
+              : searching
+                ? null
+                : <><Music2 size={32} className="empty-icon" /><p>No results for "{query}"</p></>
+            }
+          </div>
+        )}
+      </div>
     </div>
   );
 }

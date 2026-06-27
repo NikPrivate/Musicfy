@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
 
 // Plays a chosen segment of an audio source: the window [startTime,
 // startTime + duration]. Controls are a play/pause toggle that RESUMES from
 // where it left off (it doesn't restart) plus a seek slider to scrub anywhere
 // in the snippet. When `loop` is set, the window repeats so the song keeps
 // going for the whole guessing round.
-export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoPlay = false, loop = false }) {
+export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoPlay = false, loop = false, minimal = false }) {
   const audioRef = useRef(null);
   const tick = useRef(null);
   // A ref (not state) so starting/stopping a drag never re-runs the playback
@@ -14,7 +15,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0); // seconds into the snippet window
   const [error, setError] = useState('');
-  const [volume, setVolume] = useState(0.8);
+  const [volume, setVolume] = useState(0.5);
 
   function clearTick() {
     clearInterval(tick.current);
@@ -136,43 +137,48 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
 
   return (
     <div className="snippet-player">
-      {/* Hidden native element drives playback. */}
       <audio ref={audioRef} src={url} preload="auto" />
 
-      <button
-        className="btn btn--primary snippet-toggle"
-        onClick={playing ? pause : play}
-        aria-label={playing ? 'Pause' : 'Play'}
-      >
-        {playing ? '⏸' : '▶'}
-      </button>
+      {!minimal && (
+        <>
+          <button
+            className="btn btn--primary snippet-toggle"
+            onClick={playing ? pause : play}
+            aria-label={playing ? 'Pause' : 'Play'}
+          >
+            {playing ? <Pause size={18} /> : <Play size={18} />}
+          </button>
 
-      <input
-        className="seek"
-        type="range"
-        min="0"
-        max={duration}
-        step="0.1"
-        value={Math.min(Math.max(position, 0), duration)}
-        onMouseDown={() => (seeking.current = true)}
-        onTouchStart={() => (seeking.current = true)}
-        onMouseUp={() => (seeking.current = false)}
-        onTouchEnd={() => (seeking.current = false)}
-        onChange={(e) => seek(Number(e.target.value))}
-        aria-label="Seek"
-      />
-      <span className="muted snippet-time">
-        {formatTime(position)} / {formatTime(duration)}
-      </span>
+          <input
+            className="seek"
+            type="range"
+            min="0"
+            max={duration}
+            step="0.1"
+            value={Math.min(Math.max(position, 0), duration)}
+            style={{ '--pct': `${(Math.min(Math.max(position, 0), duration) / duration * 100).toFixed(1)}%` }}
+            onMouseDown={() => (seeking.current = true)}
+            onTouchStart={() => (seeking.current = true)}
+            onMouseUp={() => (seeking.current = false)}
+            onTouchEnd={() => (seeking.current = false)}
+            onChange={(e) => seek(Number(e.target.value))}
+            aria-label="Seek"
+          />
+          <span className="muted snippet-time">
+            {formatTime(position)} / {formatTime(duration)}
+          </span>
+        </>
+      )}
 
       <label className="volume" title="Volume">
-        <span aria-hidden="true">{volume === 0 ? '🔇' : '🔊'}</span>
+        <span aria-hidden="true">{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}</span>
         <input
           type="range"
           min="0"
           max="1"
           step="0.01"
           value={volume}
+          style={{ '--pct': `${(volume * 100).toFixed(1)}%` }}
           onChange={(e) => setVolume(Number(e.target.value))}
           aria-label="Volume"
         />

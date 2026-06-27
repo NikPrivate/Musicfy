@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { AVATARS, isImageUrl } from '../avatars.js';
+import { RefreshCw } from 'lucide-react';
+import { dicebearUrl, randomSeeds, isImageUrl } from '../avatars.js';
 import Avatar from './Avatar.jsx';
 
-// Shown only when a returning visitor has NO saved profile yet. Once they set
-// one it's persisted, so clicking the share link again skips this entirely
-// (preventing duplicate players for the same person).
 export default function ProfileSetup({
   initial,
   onSubmit,
@@ -13,11 +11,18 @@ export default function ProfileSetup({
   submitLabel = 'Join the lobby →',
 }) {
   const [username, setUsername] = useState(initial?.username || '');
-  // Only emoji avatars are offered. If an older saved profile used an image
-  // URL, fall back to the first emoji.
-  const [avatar, setAvatar] = useState(
-    initial?.avatar && !isImageUrl(initial.avatar) ? initial.avatar : AVATARS[0]
-  );
+
+  const [seeds, setSeeds] = useState(() => randomSeeds(8));
+  const [avatar, setAvatar] = useState(() => {
+    if (initial?.avatar && isImageUrl(initial.avatar)) return initial.avatar;
+    const s = randomSeeds(8);
+    return dicebearUrl(s[0]);
+  });
+
+  function shuffle() {
+    const next = randomSeeds(8);
+    setSeeds(next);
+  }
 
   function submit(e) {
     e.preventDefault();
@@ -45,17 +50,24 @@ export default function ProfileSetup({
         <div className="field">
           <span>Profile picture</span>
           <div className="avatar-grid">
-            {AVATARS.map((a) => (
-              <button
-                type="button"
-                key={a}
-                className={`avatar-pick ${avatar === a ? 'selected' : ''}`}
-                onClick={() => setAvatar(a)}
-              >
-                {a}
-              </button>
-            ))}
+            {seeds.map((seed) => {
+              const url = dicebearUrl(seed);
+              return (
+                <button
+                  type="button"
+                  key={seed}
+                  className={`avatar-pick ${avatar === url ? 'selected' : ''}`}
+                  onClick={() => setAvatar(url)}
+                >
+                  <img src={url} alt="avatar" width={52} height={52} />
+                </button>
+              );
+            })}
           </div>
+          <button type="button" className="btn btn--ghost avatar-shuffle" onClick={shuffle}>
+            <RefreshCw size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />
+            Shuffle
+          </button>
         </div>
 
         <div className="preview">

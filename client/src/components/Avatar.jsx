@@ -1,3 +1,4 @@
+import { User } from 'lucide-react';
 import { isImageUrl } from '../avatars.js';
 
 export default function Avatar({ value, size = 40 }) {
@@ -7,7 +8,7 @@ export default function Avatar({ value, size = 40 }) {
   }
   return (
     <span className="avatar avatar--emoji" style={style}>
-      {value || '🎵'}
+      {value || <User size={size * 0.55} />}
     </span>
   );
 }

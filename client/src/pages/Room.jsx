@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Share2, Pencil, LogOut, Music, Timer, Headphones, Lightbulb,
+  Check, CheckCircle2, Play, XCircle, Sparkles,
+  Trophy, RotateCcw, Star,
+} from 'lucide-react';
 import { socket, emit } from '../socket.js';
 import { getClientId, getProfile, saveProfile, hasProfile, clearIdentity } from '../identity.js';
 import ProfileSetup from '../components/ProfileSetup.jsx';
@@ -119,7 +124,7 @@ export default function Room() {
   if (notFound) {
     return (
       <div className="card centered">
-        <h2>Lobby not found 😕</h2>
+        <h2>Lobby not found</h2>
         <p className="muted">The code “{code}” doesn’t match an active lobby.</p>
         <a className="btn" href="/">← Back home</a>
       </div>
@@ -129,7 +134,7 @@ export default function Room() {
   if (joinError) {
     return (
       <div className="card centered">
-        <h2>Lobby is full 🙈</h2>
+        <h2>Lobby is full</h2>
         <p className="muted">{joinError}</p>
         <a className="btn" href="/">← Back home</a>
       </div>
@@ -168,7 +173,7 @@ export default function Room() {
               initial={getProfile()}
               title="Edit your profile"
               subtitle="Change how everyone sees you. Updates instantly for the whole lobby."
-              submitLabel="Save changes ✓"
+              submitLabel="Save changes"
               onSubmit={handleEditSubmit}
             />
             <div className="modal-secondary">
@@ -200,17 +205,20 @@ export default function Room() {
       <div className="room-grid">
         <aside className="card sidebar">
           <h3>
-            Players <span className="muted">({state.players.length} / {state.maxPlayers})</span>
+            {state.phase === 'submitting' ? (
+              <>Who's ready? <span className="muted">({state.players.filter((p) => p.hasSubmitted).length}/{state.players.filter((p) => p.connected).length})</span></>
+            ) : (
+              <>Players <span className="muted">({state.players.length} / {state.maxPlayers})</span></>
+            )}
           </h3>
-          <PlayerList players={state.players} youId={clientId} />
+          <PlayerList
+            players={state.players}
+            youId={clientId}
+            submitting={state.phase === 'submitting'}
+          />
           {(state.phase === 'playing' || state.phase === 'roundEnd') && (
             <p className="round-indicator">
               Song {state.roundNumber} / {state.totalRounds}
-            </p>
-          )}
-          {state.phase === 'submitting' && (
-            <p className="round-indicator">
-              {state.players.filter((p) => p.hasSubmitted).length} / {state.totalRounds} picked
             </p>
           )}
         </aside>
@@ -222,6 +230,7 @@ export default function Room() {
             isHost={isHost}
             isChooser={isChooser}
             clientId={clientId}
+            onLeave={leaveLobby}
           />
         </main>
       </div>
@@ -242,16 +251,19 @@ function ShareBar({ code, onLeave, onEdit }) {
       </div>
       <div className="share-bar-actions">
         <button className="btn btn--primary" onClick={() => setOpen(true)}>
-          🔗 Share invite link
+          <Share2 size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+          Share invite link
         </button>
         {onEdit && (
           <button className="btn btn--ghost" onClick={onEdit}>
-            ✏️ Edit profile
+            <Pencil size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            Edit profile
           </button>
         )}
         {onLeave && (
           <button className="btn btn--ghost" onClick={onLeave}>
-            🚪 Leave lobby
+            <LogOut size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            Leave lobby
           </button>
         )}
       </div>
@@ -278,7 +290,7 @@ function ShareModal({ code, onClose }) {
   return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal card share-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Invite friends 🎉</h3>
+        <h3><Sparkles size={18} className="icon-primary" style={{ verticalAlign: '-3px', marginRight: 7 }} />Invite friends</h3>
         <p className="muted">Send the link — it drops them straight into this lobby.</p>
 
         <div className="share-code-big">
@@ -289,7 +301,7 @@ function ShareModal({ code, onClose }) {
         <div className="link-row">
           <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invite link" />
           <button className="btn btn--primary" onClick={copyLink}>
-            {copied ? '✓ Copied' : 'Copy'}
+            {copied ? <><Check size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />Copied</> : 'Copy'}
           </button>
         </div>
 
@@ -304,7 +316,7 @@ function ShareModal({ code, onClose }) {
 
 // ---- Stage (phase router) ------------------------------------------------
 
-function Stage({ state, you, isHost, isChooser, clientId }) {
+function Stage({ state, you, isHost, isChooser, clientId, onLeave }) {
   switch (state.phase) {
     case 'lobby':
       return <LobbyStage state={state} isHost={isHost} />;
@@ -315,7 +327,7 @@ function Stage({ state, you, isHost, isChooser, clientId }) {
     case 'roundEnd':
       return <RoundEndStage state={state} isHost={isHost} />;
     case 'gameEnd':
-      return <GameEndStage state={state} isHost={isHost} clientId={clientId} />;
+      return <GameEndStage state={state} clientId={clientId} isHost={isHost} onLeave={onLeave} />;
     default:
       return null;
   }
@@ -341,10 +353,10 @@ function LobbyStage({ state, isHost }) {
       </p>
 
       <ul className="rules">
-        <li>⏱ <strong>{s.roundTimer}s</strong> to guess each song</li>
-        <li>🎧 <strong>{s.snippetDuration}s</strong> snippet — you choose which part</li>
-        <li>💡 A new letter revealed every <strong>{s.clueInterval}s</strong></li>
-        <li>🎵 One round per player — <strong>{state.players.length}</strong> songs this game</li>
+        <li><Timer size={15} className="rule-icon" /><strong>{s.roundTimer}s</strong> to guess each song</li>
+        <li><Headphones size={15} className="rule-icon" /><strong>{s.snippetDuration}s</strong> preview clip to guess from</li>
+        <li><Lightbulb size={15} className="rule-icon" />A new letter revealed every <strong>{s.clueInterval}s</strong></li>
+        <li><Music size={15} className="rule-icon" />One round per player — <strong>{state.players.length}</strong> songs this game</li>
       </ul>
 
       {error && <p className="error">{error}</p>}
@@ -355,7 +367,10 @@ function LobbyStage({ state, isHost }) {
           onClick={start}
           disabled={state.players.length < 2}
         >
-          {state.players.length < 2 ? 'Need at least 2 players…' : 'Start — everyone picks 🎉'}
+          {state.players.length < 2
+            ? 'Need at least 2 players…'
+            : <><Sparkles size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Start — everyone picks</>
+          }
         </button>
       ) : (
         <p className="muted">Waiting for the host to start…</p>
@@ -385,37 +400,23 @@ function SubmittingStage({ state, isHost, you }) {
         alreadySubmitted={!!you?.hasSubmitted}
       />
 
-      <div className="card">
-        <h3>
-          Who's ready? <span className="muted">({submittedCount}/{connected.length})</span>
-        </h3>
-        <ul className="player-list">
-          {connected.map((p) => (
-            <li key={p.clientId} className="player">
-              <span className="player-name">{p.username}</span>
-              <span>{p.hasSubmitted ? '✅ ready' : '⏳ picking…'}</span>
-            </li>
-          ))}
-        </ul>
+      {error && <p className="error">{error}</p>}
 
-        {error && <p className="error">{error}</p>}
-
-        {isHost ? (
-          <button
-            className="btn btn--primary btn--big"
-            onClick={begin}
-            disabled={submittedCount < 2}
-          >
-            {submittedCount < 2
-              ? 'Need at least 2 songs…'
-              : allReady
-                ? 'Begin — play the songs! ▶'
-                : `Begin anyway (${submittedCount} ready) ▶`}
-          </button>
-        ) : (
-          <p className="muted">The host starts once everyone has picked.</p>
-        )}
-      </div>
+      {isHost ? (
+        <button
+          className="btn btn--primary btn--big"
+          onClick={begin}
+          disabled={submittedCount < 2}
+        >
+          {submittedCount < 2
+            ? 'Waiting for players to pick…'
+            : allReady
+              ? <><Play size={14} style={{ verticalAlign: '-2px', marginRight: 5 }} />Begin — play the songs!</>
+              : <><Play size={14} style={{ verticalAlign: '-2px', marginRight: 5 }} />Begin anyway ({submittedCount} ready)</>}
+        </button>
+      ) : (
+        <p className="muted">The host starts once everyone has picked.</p>
+      )}
     </div>
   );
 }
@@ -426,33 +427,40 @@ function PlayingStage({ state, isChooser, you }) {
   const round = state.round;
   const remaining = useCountdown(state.roundEndsAt);
   const [guess, setGuess] = useState('');
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  const [answer, setAnswer] = useState('');
   const alreadyGuessed = you?.hasGuessed;
+
+  useEffect(() => {
+    function onAnswer({ title }) { setAnswer(title); }
+    socket.on('round:answer', onAnswer);
+    return () => socket.off('round:answer', onAnswer);
+  }, []);
 
   async function submitGuess(e) {
     e.preventDefault();
     if (!guess.trim()) return;
     const res = await emit('round:guess', { guess });
     if (res.correct) {
-      setFeedback(`✅ Correct! +${res.points} points`);
+      setFeedback({ ok: true, text: `Correct! +${res.points} points` });
       setGuess('');
     } else {
-      setFeedback('❌ Not quite — try again!');
-      setTimeout(() => setFeedback(''), 1500);
+      setFeedback({ ok: false, text: 'Not quite — try again!' });
+      setTimeout(() => setFeedback(null), 1500);
     }
   }
 
   return (
     <div className="card playing">
       <div className="timer-bar">
-        <span className={`timer ${remaining <= 10 ? 'urgent' : ''}`}>⏱ {remaining}s</span>
+        <span className={`timer ${remaining <= 10 ? 'urgent' : ''}`}>
+          <Timer size={18} style={{ verticalAlign: '-3px', marginRight: 4 }} />{remaining}s
+        </span>
         {round?.artistHint && <span className="muted">Artist: {round.artistHint}</span>}
       </div>
 
       <p className="muted centered">
-        <svg className="note-inline" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M9 17.5a2.5 2.5 0 1 1-2.5-2.5c.55 0 1.06.18 1.5.46V4l11-2v11.5a2.5 2.5 0 1 1-2-2.45V5.3L9 6.7v10.8z" />
-        </svg>{' '}
+        <Music size={15} style={{ verticalAlign: '-2px', marginRight: 5, color: 'var(--primary)' }} />
         {round.ownerName}'s song
       </p>
 
@@ -466,19 +474,29 @@ function PlayingStage({ state, isChooser, you }) {
         url={round.audio.url}
         startTime={round.audio.startTime}
         duration={round.audio.duration}
-        autoPlay={!isChooser}
+        autoPlay
         loop
+        minimal
       />
 
-      <MaskedTitle masked={round.masked} />
-      <p className="muted clue-count">
-        Guess the title · a new letter every {state.settings.clueInterval}s
-      </p>
+      {isChooser ? (
+        <p className="answer-reveal centered">{answer && <strong>{answer}</strong>}</p>
+      ) : (
+        <>
+          <MaskedTitle masked={round.masked} />
+          <p className="muted clue-count">
+            Guess the title · a new letter every {state.settings.clueInterval}s
+          </p>
+        </>
+      )}
 
       {isChooser ? (
         <OwnerView />
       ) : alreadyGuessed ? (
-        <p className="success">🎉 You got it! Waiting for the round to end…</p>
+        <p className="success">
+          <CheckCircle2 size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
+          You got it! Waiting for the round to end…
+        </p>
       ) : (
         <form className="guess-form" onSubmit={submitGuess}>
           <input
@@ -490,7 +508,15 @@ function PlayingStage({ state, isChooser, you }) {
           <button className="btn btn--primary" type="submit">Guess</button>
         </form>
       )}
-      {feedback && <p className="feedback">{feedback}</p>}
+      {feedback && (
+        <p className={feedback.ok ? 'feedback' : 'feedback feedback--wrong'}>
+          {feedback.ok
+            ? <CheckCircle2 size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
+            : <XCircle size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
+          }
+          {feedback.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -498,18 +524,9 @@ function PlayingStage({ state, isChooser, you }) {
 // The owner picked this song, so they already know the answer — they sit the
 // round out and watch the guesses roll in.
 function OwnerView() {
-  const [answer, setAnswer] = useState('');
-  useEffect(() => {
-    function onAnswer({ title }) {
-      setAnswer(title);
-    }
-    socket.on('round:answer', onAnswer);
-    return () => socket.off('round:answer', onAnswer);
-  }, []);
   return (
     <div className="chooser-view">
       <p className="muted">This is your song — sit back and watch everyone guess.</p>
-      {answer && <p className="answer-reveal">Answer: <strong>{answer}</strong></p>}
     </div>
   );
 }
@@ -548,7 +565,7 @@ function RoundEndStage({ state, isHost }) {
 
 // ---- Game end ------------------------------------------------------------
 
-function GameEndStage({ state, isHost, clientId }) {
+function GameEndStage({ state, clientId, isHost, onLeave }) {
   const players = state.players; // already sorted high → low
   const winner = players[0];
   const top3 = players.slice(0, 3);
@@ -563,7 +580,7 @@ function GameEndStage({ state, isHost, clientId }) {
     <div className="gameover-overlay">
       <Confetti />
       <div className="gameover card">
-        <div className="trophy">🏆</div>
+        <div className="trophy"><Trophy size={64} style={{ color: '#FFD700' }} /></div>
         <h2 className="gameover-title">Game over!</h2>
         {winner && (
           <p className="winner-line">
@@ -590,10 +607,15 @@ function GameEndStage({ state, isHost, clientId }) {
         )}
 
         {isHost ? (
-          <button className="btn btn--primary btn--big" onClick={again}>Play again 🔁</button>
+          <button className="btn btn--primary btn--big" onClick={again}>
+            <RotateCcw size={16} style={{ verticalAlign: '-2px', marginRight: 6 }} />Play again
+          </button>
         ) : (
           <p className="muted">Waiting for the host to start a new game…</p>
         )}
+        <button className="btn btn--ghost btn--big" onClick={onLeave} style={{ marginTop: 8 }}>
+          <LogOut size={16} style={{ verticalAlign: '-2px', marginRight: 6 }} />Leave lobby
+        </button>
       </div>
     </div>
   );
@@ -601,7 +623,11 @@ function GameEndStage({ state, isHost, clientId }) {
 
 // Top-3 podium: 2nd on the left, 1st (tallest) in the middle, 3rd on the right.
 function Podium({ top3, youId }) {
-  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const medals = {
+    1: <Trophy size={22} style={{ color: '#FFD700' }} />,
+    2: <Star size={22} style={{ color: '#C0C0C0', fill: '#C0C0C0' }} />,
+    3: <Star size={22} style={{ color: '#CD7F32', fill: '#CD7F32' }} />,
+  };
   const rankClass = { 1: 'first', 2: 'second', 3: 'third' };
   // Display order puts the winner centre-stage.
   const display = [top3[1], top3[0], top3[2]]
@@ -629,7 +655,7 @@ function Podium({ top3, youId }) {
 // Lightweight CSS-only confetti burst (no dependencies).
 function Confetti() {
   const pieces = useMemo(() => {
-    const colors = ['#1db954', '#1ed760', '#ffd966', '#ff6b6b', '#4cc9f0', '#ffffff'];
+    const colors = ['#8b5cff', '#ff5fa2', '#ffc24b', '#46e0a0', '#3fdfd4', '#ffffff'];
     return Array.from({ length: 70 }, (_, i) => ({
       left: Math.random() * 100,
       delay: Math.random() * 2.5,
