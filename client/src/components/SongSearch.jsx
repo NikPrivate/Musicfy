@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Music2, CheckCircle2, X, Search, Loader2, RefreshCw } from 'lucide-react';
+import { Music2, CheckCircle2, X, Search, Loader2, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import { emit } from '../socket.js';
 import SnippetPlayer from './SnippetPlayer.jsx';
 
@@ -141,9 +141,47 @@ function SongPicker({ onPick, onClose }) {
   const debounce = useRef(null);
   const inputRef = useRef(null);
 
+  // Shared preview audio: only one result plays at a time, with a single
+  // volume that persists across previews.
+  const audioRef = useRef(null);
+  const [previewId, setPreviewId] = useState(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [volume, setVolume] = useState(0.5);
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Keep the audio element's volume in sync without restarting playback.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
+
+  // Stop any preview when the picker unmounts.
+  useEffect(() => () => audioRef.current?.pause(), []);
+
+  // Stop a preview if its song scrolls out of the (re-fetched) results.
+  useEffect(() => {
+    if (previewId && !results.some((r) => r.id === previewId)) {
+      audioRef.current?.pause();
+    }
+  }, [results, previewId]);
+
+  function togglePreview(e, r) {
+    e.stopPropagation(); // don't pick the song — just preview it
+    const audio = audioRef.current;
+    if (!audio || !r.audioUrl) return;
+    if (previewId === r.id) {
+      if (audio.paused) audio.play().catch(() => {});
+      else audio.pause();
+      return;
+    }
+    audio.src = r.audioUrl;
+    audio.volume = volume;
+    audio.currentTime = 0;
+    setPreviewId(r.id);
+    audio.play().catch(() => {});
+  }
 
   useEffect(() => {
     clearTimeout(debounce.current);
@@ -171,6 +209,12 @@ function SongPicker({ onPick, onClose }) {
   return (
     <div className="song-picker-overlay" onClick={onClose}>
       <div className="song-picker" onClick={(e) => e.stopPropagation()} onKeyDown={handleKey}>
+        <audio
+          ref={audioRef}
+          onPlay={() => setPreviewPlaying(true)}
+          onPause={() => setPreviewPlaying(false)}
+          onEnded={() => setPreviewPlaying(false)}
+        />
         <div className="song-picker-header">
           <div className="search-input-wrap" style={{ flex: 1 }}>
             <Search size={16} className="search-icon" />
@@ -183,6 +227,19 @@ function SongPicker({ onPick, onClose }) {
             />
             {searching && <Loader2 size={16} className="search-spinner spin" />}
           </div>
+          <label className="volume song-picker-volume" title="Preview volume">
+            <span aria-hidden="true">{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={volume}
+              style={{ '--pct': `${(volume * 100).toFixed(1)}%` }}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              aria-label="Preview volume"
+            />
+          </label>
           <button className="song-picker-close" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
@@ -190,18 +247,32 @@ function SongPicker({ onPick, onClose }) {
 
         {results.length > 0 ? (
           <ul className="song-picker-list">
-            {results.map((r) => (
-              <li key={r.id} className="suggestion" onClick={() => onPick(r)}>
-                {r.artwork
-                  ? <img src={r.artwork} alt="" className="art-sm" />
-                  : <div className="art-sm art-placeholder"><Music2 size={18} /></div>
-                }
-                <span className="suggestion-text">
-                  <strong>{r.title}</strong>
-                  <span className="muted"> · {r.artist}</span>
-                </span>
-              </li>
-            ))}
+            {results.map((r) => {
+              const isCurrent = previewId === r.id;
+              const isPlaying = isCurrent && previewPlaying;
+              return (
+                <li key={r.id} className="suggestion" onClick={() => onPick(r)}>
+                  <button
+                    type="button"
+                    className={`suggestion-preview ${isCurrent ? 'is-active' : ''}`}
+                    onClick={(e) => togglePreview(e, r)}
+                    disabled={!r.audioUrl}
+                    aria-label={isPlaying ? 'Pause preview' : 'Play preview'}
+                    title={r.audioUrl ? (isPlaying ? 'Pause preview' : 'Play preview') : 'No preview available'}
+                  >
+                    {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                  </button>
+                  {r.artwork
+                    ? <img src={r.artwork} alt="" className="art-sm" />
+                    : <div className="art-sm art-placeholder"><Music2 size={18} /></div>
+                  }
+                  <span className="suggestion-text">
+                    <strong>{r.title}</strong>
+                    <span className="muted"> · {r.artist}</span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <div className="song-picker-empty">

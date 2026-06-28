@@ -16,6 +16,7 @@ const DEFAULTS = {
   roundTimer: 30, // seconds to guess (the song plays for the whole window)
   snippetDuration: 30, // fixed snippet length; players pick the start point only
   clueInterval: 8, // reveal one more letter every N seconds, automatically
+  ownerBonus: 15, // points the song's owner earns for each player who guesses it
 };
 
 // Max players per lobby. Existing players reconnecting are always let back in;
@@ -291,7 +292,16 @@ export class Lobby {
     const points = Math.max(20, Math.round(20 + 80 * (secondsLeft / this.settings.roundTimer)));
     player.score += points;
     this.guessedThisRound.add(clientId);
-    return { correct: true, points };
+
+    // Reward the song's owner too: a fixed bonus for each player who guesses it,
+    // so hosting a round isn't a scoring dead-zone. Picking a guessable song pays off.
+    const owner = this.players.get(this.ownerClientId);
+    let ownerPoints = 0;
+    if (owner) {
+      ownerPoints = this.settings.ownerBonus;
+      owner.score += ownerPoints;
+    }
+    return { correct: true, points, ownerClientId: this.ownerClientId, ownerPoints };
   }
 
   // Everyone (except the song's owner) guessed? Then the round can end early.

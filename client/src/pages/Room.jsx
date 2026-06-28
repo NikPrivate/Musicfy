@@ -1,18 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
-  Share2, Pencil, LogOut, Music, Timer, Headphones, Lightbulb,
-  Check, CheckCircle2, Play, XCircle, Sparkles,
-  Trophy, RotateCcw, Star,
-} from 'lucide-react';
-import { socket, emit } from '../socket.js';
-import { getClientId, getProfile, saveProfile, hasProfile, clearIdentity } from '../identity.js';
-import ProfileSetup from '../components/ProfileSetup.jsx';
-import PlayerList from '../components/PlayerList.jsx';
-import SongSearch from '../components/SongSearch.jsx';
-import SnippetPlayer from '../components/SnippetPlayer.jsx';
-import Avatar from '../components/Avatar.jsx';
+  Share2,
+  Pencil,
+  LogOut,
+  Music,
+  Timer,
+  Headphones,
+  Lightbulb,
+  Check,
+  CheckCircle2,
+  Play,
+  XCircle,
+  Sparkles,
+  Trophy,
+  RotateCcw,
+  Star,
+} from "lucide-react";
+import { socket, emit } from "../socket.js";
+import {
+  getClientId,
+  getProfile,
+  saveProfile,
+  hasProfile,
+  clearIdentity,
+} from "../identity.js";
+import ProfileSetup from "../components/ProfileSetup.jsx";
+import PlayerList from "../components/PlayerList.jsx";
+import SongSearch from "../components/SongSearch.jsx";
+import SnippetPlayer from "../components/SnippetPlayer.jsx";
+import Avatar from "../components/Avatar.jsx";
 
 export default function Room() {
   const { code } = useParams();
@@ -22,7 +40,7 @@ export default function Room() {
   const [state, setState] = useState(null); // public lobby state
   const [joined, setJoined] = useState(false);
   const [notFound, setNotFound] = useState(false);
-  const [joinError, setJoinError] = useState(''); // e.g. "Lobby is full"
+  const [joinError, setJoinError] = useState(""); // e.g. "Lobby is full"
   const [showLeave, setShowLeave] = useState(false); // leave-confirmation modal
   const [showEdit, setShowEdit] = useState(false); // edit name/avatar modal
   // needProfile drives whether we show the setup screen. If the user already
@@ -36,13 +54,13 @@ export default function Room() {
 
   // Join (or rejoin) the lobby with the current profile.
   async function doJoin(profile) {
-    const res = await emit('lobby:join', { code, clientId, profile });
+    const res = await emit("lobby:join", { code, clientId, profile });
     if (!res.ok) {
-      if (res.full) setJoinError(res.error || 'This lobby is full.');
+      if (res.full) setJoinError(res.error || "This lobby is full.");
       else setNotFound(true);
       return;
     }
-    setJoinError('');
+    setJoinError("");
     setState(res.state);
     setJoined(true);
     setNeedProfile(false);
@@ -55,7 +73,7 @@ export default function Room() {
     function onState(s) {
       setState(s);
     }
-    socket.on('lobby:state', onState);
+    socket.on("lobby:state", onState);
 
     // On (re)connect, transparently rejoin using our stable clientId so a
     // dropped connection never turns into a second player.
@@ -63,7 +81,7 @@ export default function Room() {
       const p = getProfile();
       if (p && p.username) doJoin(p);
     }
-    socket.on('connect', onConnect);
+    socket.on("connect", onConnect);
 
     if (hasProfile()) {
       doJoin(getProfile());
@@ -75,8 +93,8 @@ export default function Room() {
     }
 
     return () => {
-      socket.off('lobby:state', onState);
-      socket.off('connect', onConnect);
+      socket.off("lobby:state", onState);
+      socket.off("connect", onConnect);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
@@ -91,42 +109,46 @@ export default function Room() {
   // They can only exit via the "Leave lobby" button.
   useEffect(() => {
     if (!joined) return;
-    window.history.pushState(null, '', window.location.href);
+    window.history.pushState(null, "", window.location.href);
     function onPopState() {
-      window.history.pushState(null, '', window.location.href);
+      window.history.pushState(null, "", window.location.href);
       setShowLeave(true);
     }
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, [joined]);
 
   // Actually leave: tell the server to drop us, then go home.
   function leaveLobby() {
-    emit('lobby:leave');
+    emit("lobby:leave");
     setShowLeave(false);
-    navigate('/');
+    navigate("/");
   }
 
   // Save edited name/avatar: persist locally and push the change to everyone.
   function handleEditSubmit(profile) {
     saveProfile(profile);
-    emit('profile:update', { profile });
+    emit("profile:update", { profile });
     setShowEdit(false);
   }
 
   // Start over as a brand-new user: leave, wipe identity, reload home.
   async function resetIdentity() {
-    await emit('lobby:leave');
+    await emit("lobby:leave");
     clearIdentity();
-    window.location.href = '/';
+    window.location.href = "/";
   }
 
   if (notFound) {
     return (
       <div className="card centered">
         <h2>Lobby not found</h2>
-        <p className="muted">The code “{code}” doesn’t match an active lobby.</p>
-        <a className="btn" href="/">← Back home</a>
+        <p className="muted">
+          The code “{code}” doesn’t match an active lobby.
+        </p>
+        <a className="btn" href="/">
+          ← Back home
+        </a>
       </div>
     );
   }
@@ -136,7 +158,9 @@ export default function Room() {
       <div className="card centered">
         <h2>Lobby is full</h2>
         <p className="muted">{joinError}</p>
-        <a className="btn" href="/">← Back home</a>
+        <a className="btn" href="/">
+          ← Back home
+        </a>
       </div>
     );
   }
@@ -177,8 +201,13 @@ export default function Room() {
               onSubmit={handleEditSubmit}
             />
             <div className="modal-secondary">
-              <button className="link-btn" onClick={() => setShowEdit(false)}>Cancel</button>
-              <button className="link-btn link-btn--danger" onClick={resetIdentity}>
+              <button className="link-btn" onClick={() => setShowEdit(false)}>
+                Cancel
+              </button>
+              <button
+                className="link-btn link-btn--danger"
+                onClick={resetIdentity}
+              >
                 Reset identity & start fresh
               </button>
             </div>
@@ -191,12 +220,17 @@ export default function Room() {
           <div className="modal card" onClick={(e) => e.stopPropagation()}>
             <h3>Leave the lobby?</h3>
             <p className="muted">
-              You'll exit the game{isHost ? ' (the host role passes to someone else)' : ''}.
-              You can rejoin from the invite link later.
+              You'll exit the game
+              {isHost ? " (the host role passes to someone else)" : ""}. You can
+              rejoin from the invite link later.
             </p>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setShowLeave(false)}>Stay</button>
-              <button className="btn btn--primary" onClick={leaveLobby}>Leave</button>
+              <button className="btn" onClick={() => setShowLeave(false)}>
+                Stay
+              </button>
+              <button className="btn btn--primary" onClick={leaveLobby}>
+                Leave
+              </button>
             </div>
           </div>
         </div>
@@ -205,18 +239,29 @@ export default function Room() {
       <div className="room-grid">
         <aside className="card sidebar">
           <h3>
-            {state.phase === 'submitting' ? (
-              <>Who's ready? <span className="muted">({state.players.filter((p) => p.hasSubmitted).length}/{state.players.filter((p) => p.connected).length})</span></>
+            {state.phase === "submitting" ? (
+              <>
+                Who's ready?{" "}
+                <span className="muted">
+                  ({state.players.filter((p) => p.hasSubmitted).length}/
+                  {state.players.filter((p) => p.connected).length})
+                </span>
+              </>
             ) : (
-              <>Players <span className="muted">({state.players.length} / {state.maxPlayers})</span></>
+              <>
+                Players{" "}
+                <span className="muted">
+                  ({state.players.length} / {state.maxPlayers})
+                </span>
+              </>
             )}
           </h3>
           <PlayerList
             players={state.players}
             youId={clientId}
-            submitting={state.phase === 'submitting'}
+            submitting={state.phase === "submitting"}
           />
-          {(state.phase === 'playing' || state.phase === 'roundEnd') && (
+          {(state.phase === "playing" || state.phase === "roundEnd") && (
             <p className="round-indicator">
               Song {state.roundNumber} / {state.totalRounds}
             </p>
@@ -251,18 +296,24 @@ function ShareBar({ code, onLeave, onEdit }) {
       </div>
       <div className="share-bar-actions">
         <button className="btn btn--primary" onClick={() => setOpen(true)}>
-          <Share2 size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+          <Share2 size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />
           Share invite link
         </button>
         {onEdit && (
           <button className="btn btn--ghost" onClick={onEdit}>
-            <Pencil size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            <Pencil
+              size={15}
+              style={{ verticalAlign: "-2px", marginRight: 6 }}
+            />
             Edit profile
           </button>
         )}
         {onLeave && (
           <button className="btn btn--ghost" onClick={onLeave}>
-            <LogOut size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            <LogOut
+              size={15}
+              style={{ verticalAlign: "-2px", marginRight: 6 }}
+            />
             Leave lobby
           </button>
         )}
@@ -283,15 +334,27 @@ function ShareModal({ code, onClose }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      window.prompt('Copy this link:', link);
+      window.prompt("Copy this link:", link);
     }
   }
 
   return createPortal(
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal card share-modal" onClick={(e) => e.stopPropagation()}>
-        <h3><Sparkles size={18} className="icon-primary" style={{ verticalAlign: '-3px', marginRight: 7 }} />Invite friends</h3>
-        <p className="muted">Send the link — it drops them straight into this lobby.</p>
+      <div
+        className="modal card share-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>
+          <Sparkles
+            size={18}
+            className="icon-primary"
+            style={{ verticalAlign: "-3px", marginRight: 7 }}
+          />
+          Invite friends
+        </h3>
+        <p className="muted">
+          Send the link — it drops them straight into this lobby.
+        </p>
 
         <div className="share-code-big">
           <span className="muted">Lobby code</span>
@@ -299,18 +362,35 @@ function ShareModal({ code, onClose }) {
         </div>
 
         <div className="link-row">
-          <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invite link" />
+          <input
+            readOnly
+            value={link}
+            onFocus={(e) => e.target.select()}
+            aria-label="Invite link"
+          />
           <button className="btn btn--primary" onClick={copyLink}>
-            {copied ? <><Check size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />Copied</> : 'Copy'}
+            {copied ? (
+              <>
+                <Check
+                  size={14}
+                  style={{ verticalAlign: "-2px", marginRight: 4 }}
+                />
+                Copied
+              </>
+            ) : (
+              "Copy"
+            )}
           </button>
         </div>
 
         <div className="share-modal-actions">
-          <button className="btn btn--ghost" onClick={onClose}>Close</button>
+          <button className="btn btn--ghost" onClick={onClose}>
+            Close
+          </button>
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 }
 
@@ -318,16 +398,23 @@ function ShareModal({ code, onClose }) {
 
 function Stage({ state, you, isHost, isChooser, clientId, onLeave }) {
   switch (state.phase) {
-    case 'lobby':
+    case "lobby":
       return <LobbyStage state={state} isHost={isHost} />;
-    case 'submitting':
+    case "submitting":
       return <SubmittingStage state={state} isHost={isHost} you={you} />;
-    case 'playing':
+    case "playing":
       return <PlayingStage state={state} isChooser={isChooser} you={you} />;
-    case 'roundEnd':
+    case "roundEnd":
       return <RoundEndStage state={state} isHost={isHost} />;
-    case 'gameEnd':
-      return <GameEndStage state={state} clientId={clientId} isHost={isHost} onLeave={onLeave} />;
+    case "gameEnd":
+      return (
+        <GameEndStage
+          state={state}
+          clientId={clientId}
+          isHost={isHost}
+          onLeave={onLeave}
+        />
+      );
     default:
       return null;
   }
@@ -336,27 +423,49 @@ function Stage({ state, you, isHost, isChooser, clientId, onLeave }) {
 // ---- Lobby (waiting room + settings) -------------------------------------
 
 function LobbyStage({ state, isHost }) {
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const s = state.settings;
 
   async function start() {
-    setError('');
-    const res = await emit('game:start');
-    if (!res.ok) setError(res.error || 'Could not start the game.');
+    setError("");
+    const res = await emit("game:start");
+    if (!res.ok) setError(res.error || "Could not start the game.");
   }
 
   return (
     <div className="card">
       <h2>Waiting room</h2>
       <p className="muted">
-        Share the invite link above. Once everyone’s in, the host starts the game.
+        Share the invite link above. Once everyone’s in, the host starts the
+        game.
       </p>
 
       <ul className="rules">
-        <li><Timer size={15} className="rule-icon" /><strong>{s.roundTimer}s</strong> to guess each song</li>
-        <li><Headphones size={15} className="rule-icon" /><strong>{s.snippetDuration}s</strong> preview clip to guess from</li>
-        <li><Lightbulb size={15} className="rule-icon" />A new letter revealed every <strong>{s.clueInterval}s</strong></li>
-        <li><Music size={15} className="rule-icon" />One round per player — <strong>{state.players.length}</strong> songs this game</li>
+        <li>
+          <Timer size={15} className="rule-icon" />
+          <span>
+            <strong>{s.roundTimer}s</strong> to guess each song
+          </span>
+        </li>
+        <li>
+          <Headphones size={15} className="rule-icon" />
+          <span>
+            <strong>{s.snippetDuration}s</strong> preview clip to guess from
+          </span>
+        </li>
+        <li>
+          <Lightbulb size={15} className="rule-icon" />
+          <span>
+            A new letter revealed every <strong>{s.clueInterval}s</strong>
+          </span>
+        </li>
+        <li>
+          <Music size={15} className="rule-icon" />
+          <span>
+            One round per player — <strong>{state.players.length}</strong> songs
+            this game
+          </span>
+        </li>
       </ul>
 
       {error && <p className="error">{error}</p>}
@@ -367,10 +476,17 @@ function LobbyStage({ state, isHost }) {
           onClick={start}
           disabled={state.players.length < 2}
         >
-          {state.players.length < 2
-            ? 'Need at least 2 players…'
-            : <><Sparkles size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />Start — everyone picks</>
-          }
+          {state.players.length < 2 ? (
+            "Need at least 2 players…"
+          ) : (
+            <>
+              <Sparkles
+                size={15}
+                style={{ verticalAlign: "-2px", marginRight: 6 }}
+              />
+              Start — everyone picks
+            </>
+          )}
         </button>
       ) : (
         <p className="muted">Waiting for the host to start…</p>
@@ -382,15 +498,15 @@ function LobbyStage({ state, isHost }) {
 // ---- Submitting (everyone picks their song at once) ----------------------
 
 function SubmittingStage({ state, isHost, you }) {
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const connected = state.players.filter((p) => p.connected);
   const submittedCount = connected.filter((p) => p.hasSubmitted).length;
   const allReady = submittedCount === connected.length;
 
   async function begin() {
-    setError('');
-    const res = await emit('game:begin');
-    if (!res.ok) setError(res.error || 'Could not begin the game.');
+    setError("");
+    const res = await emit("game:begin");
+    if (!res.ok) setError(res.error || "Could not begin the game.");
   }
 
   return (
@@ -408,11 +524,25 @@ function SubmittingStage({ state, isHost, you }) {
           onClick={begin}
           disabled={submittedCount < 2}
         >
-          {submittedCount < 2
-            ? 'Waiting for players to pick…'
-            : allReady
-              ? <><Play size={14} style={{ verticalAlign: '-2px', marginRight: 5 }} />Begin — play the songs!</>
-              : <><Play size={14} style={{ verticalAlign: '-2px', marginRight: 5 }} />Begin anyway ({submittedCount} ready)</>}
+          {submittedCount < 2 ? (
+            "Waiting for players to pick…"
+          ) : allReady ? (
+            <>
+              <Play
+                size={14}
+                style={{ verticalAlign: "-2px", marginRight: 5 }}
+              />
+              Begin — play the songs!
+            </>
+          ) : (
+            <>
+              <Play
+                size={14}
+                style={{ verticalAlign: "-2px", marginRight: 5 }}
+              />
+              Begin anyway ({submittedCount} ready)
+            </>
+          )}
         </button>
       ) : (
         <p className="muted">The host starts once everyone has picked.</p>
@@ -426,26 +556,28 @@ function SubmittingStage({ state, isHost, you }) {
 function PlayingStage({ state, isChooser, you }) {
   const round = state.round;
   const remaining = useCountdown(state.roundEndsAt);
-  const [guess, setGuess] = useState('');
+  const [guess, setGuess] = useState("");
   const [feedback, setFeedback] = useState(null);
-  const [answer, setAnswer] = useState('');
+  const [answer, setAnswer] = useState("");
   const alreadyGuessed = you?.hasGuessed;
 
   useEffect(() => {
-    function onAnswer({ title }) { setAnswer(title); }
-    socket.on('round:answer', onAnswer);
-    return () => socket.off('round:answer', onAnswer);
+    function onAnswer({ title }) {
+      setAnswer(title);
+    }
+    socket.on("round:answer", onAnswer);
+    return () => socket.off("round:answer", onAnswer);
   }, []);
 
   async function submitGuess(e) {
     e.preventDefault();
     if (!guess.trim()) return;
-    const res = await emit('round:guess', { guess });
+    const res = await emit("round:guess", { guess });
     if (res.correct) {
       setFeedback({ ok: true, text: `Correct! +${res.points} points` });
-      setGuess('');
+      setGuess("");
     } else {
-      setFeedback({ ok: false, text: 'Not quite — try again!' });
+      setFeedback({ ok: false, text: "Not quite — try again!" });
       setTimeout(() => setFeedback(null), 1500);
     }
   }
@@ -453,21 +585,35 @@ function PlayingStage({ state, isChooser, you }) {
   return (
     <div className="card playing">
       <div className="timer-bar">
-        <span className={`timer ${remaining <= 10 ? 'urgent' : ''}`}>
-          <Timer size={18} style={{ verticalAlign: '-3px', marginRight: 4 }} />{remaining}s
+        <span className={`timer ${remaining <= 10 ? "urgent" : ""}`}>
+          <Timer size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />
+          {remaining}s
         </span>
-        {round?.artistHint && <span className="muted">Artist: {round.artistHint}</span>}
+        {round?.artistHint && (
+          <span className="muted">Artist: {round.artistHint}</span>
+        )}
       </div>
 
       <p className="muted centered">
-        <Music size={15} style={{ verticalAlign: '-2px', marginRight: 5, color: 'var(--primary)' }} />
+        <Music
+          size={15}
+          style={{
+            verticalAlign: "-2px",
+            marginRight: 5,
+            color: "var(--primary)",
+          }}
+        />
         {round.ownerName}'s song
       </p>
 
       {/* Album art stays blurred while guessing so it sets the mood without
           giving the answer away; it's revealed sharp at round end. */}
       {round.audio.artwork && (
-        <img src={round.audio.artwork} alt="" className="album-art album-art--blurred" />
+        <img
+          src={round.audio.artwork}
+          alt=""
+          className="album-art album-art--blurred"
+        />
       )}
 
       <SnippetPlayer
@@ -480,7 +626,9 @@ function PlayingStage({ state, isChooser, you }) {
       />
 
       {isChooser ? (
-        <p className="answer-reveal centered">{answer && <strong>{answer}</strong>}</p>
+        <p className="answer-reveal centered">
+          {answer && <strong>{answer}</strong>}
+        </p>
       ) : (
         <>
           <MaskedTitle masked={round.masked} />
@@ -494,7 +642,10 @@ function PlayingStage({ state, isChooser, you }) {
         <OwnerView />
       ) : alreadyGuessed ? (
         <p className="success">
-          <CheckCircle2 size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
+          <CheckCircle2
+            size={15}
+            style={{ verticalAlign: "-3px", marginRight: 5 }}
+          />
           You got it! Waiting for the round to end…
         </p>
       ) : (
@@ -505,15 +656,24 @@ function PlayingStage({ state, isChooser, you }) {
             value={guess}
             onChange={(e) => setGuess(e.target.value)}
           />
-          <button className="btn btn--primary" type="submit">Guess</button>
+          <button className="btn btn--primary" type="submit">
+            Guess
+          </button>
         </form>
       )}
       {feedback && (
-        <p className={feedback.ok ? 'feedback' : 'feedback feedback--wrong'}>
-          {feedback.ok
-            ? <CheckCircle2 size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
-            : <XCircle size={15} style={{ verticalAlign: '-3px', marginRight: 5 }} />
-          }
+        <p className={feedback.ok ? "feedback" : "feedback feedback--wrong"}>
+          {feedback.ok ? (
+            <CheckCircle2
+              size={15}
+              style={{ verticalAlign: "-3px", marginRight: 5 }}
+            />
+          ) : (
+            <XCircle
+              size={15}
+              style={{ verticalAlign: "-3px", marginRight: 5 }}
+            />
+          )}
           {feedback.text}
         </p>
       )}
@@ -526,7 +686,10 @@ function PlayingStage({ state, isChooser, you }) {
 function OwnerView() {
   return (
     <div className="chooser-view">
-      <p className="muted">This is your song — sit back and watch everyone guess.</p>
+      <p className="muted">
+        This is your song — sit back and watch. You earn points for every player
+        who guesses it.
+      </p>
     </div>
   );
 }
@@ -538,23 +701,29 @@ function RoundEndStage({ state, isHost }) {
   const ownerName = state.round?.ownerName;
   const isLast = state.roundNumber >= state.totalRounds;
   async function next() {
-    await emit('round:next');
+    await emit("round:next");
   }
   return (
     <div className="card centered">
-      <h2>Song {state.roundNumber} of {state.totalRounds} over!</h2>
+      <h2>
+        Song {state.roundNumber} of {state.totalRounds} over!
+      </h2>
       {state.round?.audio?.artwork && (
-        <img src={state.round.audio.artwork} alt="album cover" className="album-art" />
+        <img
+          src={state.round.audio.artwork}
+          alt="album cover"
+          className="album-art"
+        />
       )}
       <p className="answer-reveal">
-        {ownerName ? `${ownerName}'s song was: ` : 'The song was: '}
+        {ownerName ? `${ownerName}'s song was: ` : "The song was: "}
         <strong>{answer}</strong>
       </p>
       <h3>Scoreboard</h3>
       <PlayerList players={state.players} youId={null} />
       {isHost ? (
         <button className="btn btn--primary btn--big" onClick={next}>
-          {isLast ? 'See final results →' : 'Next song →'}
+          {isLast ? "See final results →" : "Next song →"}
         </button>
       ) : (
         <p className="muted">Waiting for the host to continue…</p>
@@ -573,14 +742,16 @@ function GameEndStage({ state, clientId, isHost, onLeave }) {
   const [showScores, setShowScores] = useState(false);
 
   async function again() {
-    await emit('game:reset');
+    await emit("game:reset");
   }
 
   return (
     <div className="gameover-overlay">
       <Confetti />
       <div className="gameover card">
-        <div className="trophy"><Trophy size={64} style={{ color: '#FFD700' }} /></div>
+        <div className="trophy">
+          <Trophy size={64} style={{ color: "#FFD700" }} />
+        </div>
         <h2 className="gameover-title">Game over!</h2>
         {winner && (
           <p className="winner-line">
@@ -598,7 +769,7 @@ function GameEndStage({ state, clientId, isHost, onLeave }) {
         )}
 
         <button className="link-btn" onClick={() => setShowScores((s) => !s)}>
-          {showScores ? 'Hide full scoreboard' : 'Show full scoreboard'}
+          {showScores ? "Hide full scoreboard" : "Show full scoreboard"}
         </button>
         {showScores && (
           <div className="gameover-scores">
@@ -608,13 +779,22 @@ function GameEndStage({ state, clientId, isHost, onLeave }) {
 
         {isHost ? (
           <button className="btn btn--primary btn--big" onClick={again}>
-            <RotateCcw size={16} style={{ verticalAlign: '-2px', marginRight: 6 }} />Play again
+            <RotateCcw
+              size={16}
+              style={{ verticalAlign: "-2px", marginRight: 6 }}
+            />
+            Play again
           </button>
         ) : (
           <p className="muted">Waiting for the host to start a new game…</p>
         )}
-        <button className="btn btn--ghost btn--big" onClick={onLeave} style={{ marginTop: 8 }}>
-          <LogOut size={16} style={{ verticalAlign: '-2px', marginRight: 6 }} />Leave lobby
+        <button
+          className="btn btn--ghost btn--big"
+          onClick={onLeave}
+          style={{ marginTop: 8 }}
+        >
+          <LogOut size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          Leave lobby
         </button>
       </div>
     </div>
@@ -624,11 +804,11 @@ function GameEndStage({ state, clientId, isHost, onLeave }) {
 // Top-3 podium: 2nd on the left, 1st (tallest) in the middle, 3rd on the right.
 function Podium({ top3, youId }) {
   const medals = {
-    1: <Trophy size={22} style={{ color: '#FFD700' }} />,
-    2: <Star size={22} style={{ color: '#C0C0C0', fill: '#C0C0C0' }} />,
-    3: <Star size={22} style={{ color: '#CD7F32', fill: '#CD7F32' }} />,
+    1: <Trophy size={22} style={{ color: "#FFD700" }} />,
+    2: <Star size={22} style={{ color: "#C0C0C0", fill: "#C0C0C0" }} />,
+    3: <Star size={22} style={{ color: "#CD7F32", fill: "#CD7F32" }} />,
   };
-  const rankClass = { 1: 'first', 2: 'second', 3: 'third' };
+  const rankClass = { 1: "first", 2: "second", 3: "third" };
   // Display order puts the winner centre-stage.
   const display = [top3[1], top3[0], top3[2]]
     .map((p) => (p ? { p, rank: top3.indexOf(p) + 1 } : null))
@@ -640,10 +820,8 @@ function Podium({ top3, youId }) {
         <div key={p.clientId} className={`podium-spot ${rankClass[rank]}`}>
           <span className="podium-medal">{medals[rank]}</span>
           <Avatar value={p.avatar} size={44} />
-          <span className="podium-name">
-            {p.username}
-            {p.clientId === youId && <em className="you-tag"> (you)</em>}
-          </span>
+          <span className="podium-name" title={p.username}>{p.username}</span>
+          {p.clientId === youId && <span className="you-tag">you</span>}
           <span className="podium-score">{p.score} pts</span>
           <div className="podium-bar">{rank}</div>
         </div>
@@ -655,7 +833,14 @@ function Podium({ top3, youId }) {
 // Lightweight CSS-only confetti burst (no dependencies).
 function Confetti() {
   const pieces = useMemo(() => {
-    const colors = ['#8b5cff', '#ff5fa2', '#ffc24b', '#46e0a0', '#3fdfd4', '#ffffff'];
+    const colors = [
+      "#8b5cff",
+      "#ff5fa2",
+      "#ffc24b",
+      "#46e0a0",
+      "#3fdfd4",
+      "#ffffff",
+    ];
     return Array.from({ length: 70 }, (_, i) => ({
       left: Math.random() * 100,
       delay: Math.random() * 2.5,
@@ -692,16 +877,19 @@ function Confetti() {
 // "I Don't Care" reads as "_ ____ ____".
 function MaskedTitle({ masked }) {
   const words = masked
-    .split(' ')
-    .map((w) => w.split('').filter((c) => c === '_' || /[a-z0-9]/i.test(c)))
+    .split(" ")
+    .map((w) => w.split("").filter((c) => c === "_" || /[a-z0-9]/i.test(c)))
     .filter((chars) => chars.length > 0);
   return (
     <div className="masked">
       {words.map((chars, wi) => (
         <span className="mask-word" key={wi}>
           {chars.map((c, ci) => (
-            <span key={ci} className={`mask-slot ${c === '_' ? 'is-blank' : 'is-filled'}`}>
-              {c === '_' ? '' : c}
+            <span
+              key={ci}
+              className={`mask-slot ${c === "_" ? "is-blank" : "is-filled"}`}
+            >
+              {c === "_" ? "" : c}
             </span>
           ))}
         </span>
