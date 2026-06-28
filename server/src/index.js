@@ -213,6 +213,30 @@ function maybeEndRoundEarly(lobby) {
   return false;
 }
 
+// Handle a player departing a lobby, whether via the in-app "Leave lobby"
+// button or by closing/losing their browser. While a round is live we only mark
+// them disconnected so the play order + scores survive a reconnect; otherwise
+// (waiting in the lobby, submitting, game over) we fully remove them so they
+// don't linger as a "no connection" ghost in everyone else's player list.
+function removePlayer(lobby, socket) {
+  const clientId = socket.data.clientId;
+  const inGame = lobby.phase === PHASES.PLAYING || lobby.phase === PHASES.ROUND_END;
+  if (inGame) {
+    lobby.markDisconnected(socket.id);
+  } else {
+    lobby.players.delete(clientId);
+    lobby.playOrder = lobby.playOrder.filter((id) => id !== clientId);
+  }
+  lobby.reassignHostIfNeeded();
+  broadcast(lobby);
+  // Clean up fully-empty lobbies after a grace period.
+  if (lobby.isEmpty()) {
+    setTimeout(() => {
+      if (lobby.isEmpty()) manager.remove(lobby.code);
+    }, 60 * 1000);
+  }
+}
+
 io.on('connection', (socket) => {
   // socket.data holds the lobby code + clientId once joined.
 
@@ -379,22 +403,8 @@ io.on('connection', (socket) => {
   socket.on('lobby:leave', (_payload, cb) => {
     const lobby = manager.get(socket.data.code);
     if (lobby) {
-      const clientId = socket.data.clientId;
-      const inGame = lobby.phase === PHASES.PLAYING || lobby.phase === PHASES.ROUND_END;
-      if (inGame) {
-        lobby.markDisconnected(socket.id);
-      } else {
-        lobby.players.delete(clientId);
-        lobby.playOrder = lobby.playOrder.filter((id) => id !== clientId);
-      }
-      lobby.reassignHostIfNeeded();
+      removePlayer(lobby, socket);
       socket.leave(lobby.code);
-      broadcast(lobby);
-      if (lobby.isEmpty()) {
-        setTimeout(() => {
-          if (lobby.isEmpty()) manager.remove(lobby.code);
-        }, 60 * 1000);
-      }
     }
     socket.data.code = null;
     socket.data.clientId = null;
@@ -404,15 +414,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const lobby = manager.get(socket.data.code);
     if (!lobby) return;
-    lobby.markDisconnected(socket.id);
-    lobby.reassignHostIfNeeded();
-    broadcast(lobby);
-    // Clean up fully-empty lobbies after a grace period.
-    if (lobby.isEmpty()) {
-      setTimeout(() => {
-        if (lobby.isEmpty()) manager.remove(lobby.code);
-      }, 60 * 1000);
-    }
+    // Closing the browser/tab while waiting in the lobby should remove the
+    // player outright (they left), not leave them as a "no connection" ghost.
+    // Mid-game it still just marks them disconnected so they can reconnect.
+    removePlayer(lobby, socket);
   });
 });
 
