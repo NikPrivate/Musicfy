@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
+import { useVolume } from '../volume.js';
+import { useAudioUnlocked } from '../audioUnlock.js';
 
 // Plays a chosen segment of an audio source: the window [startTime,
 // startTime + duration]. Controls are a play/pause toggle that RESUMES from
@@ -15,14 +17,19 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0); // seconds into the snippet window
   const [error, setError] = useState('');
-  const [volume, setVolume] = useState(0.5);
+  // Mobile browsers (iOS Safari, Chrome Android) block audio until a user
+  // gesture. When autoplay is refused we show a "Tap to play" button instead of
+  // an error so the player can start the clip with one tap.
+  const [blocked, setBlocked] = useState(false);
+  const volume = useVolume(); // shared master volume (controlled from the share bar)
+  const audioUnlocked = useAudioUnlocked(); // flips true after the first page gesture
 
   function clearTick() {
     clearInterval(tick.current);
     tick.current = null;
   }
 
-  function play() {
+  function play(userGesture = false) {
     const audio = audioRef.current;
     if (!audio) return;
     setError('');
@@ -38,8 +45,19 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
       }
     }
     const started = audio.play();
-    if (started && started.catch) {
-      started.catch(() => setError('Could not play audio. Check the URL / autoplay settings.'));
+    if (started && started.then) {
+      started
+        .then(() => setBlocked(false))
+        .catch((err) => {
+          // Autoplay refused (no user gesture yet) → offer a tap-to-play button
+          // rather than a scary error. A real failure on a user tap is a genuine
+          // playback problem, so surface the error then.
+          if (!userGesture || err?.name === 'NotAllowedError') {
+            setBlocked(true);
+          } else {
+            setError('Could not play audio. Check the URL / autoplay settings.');
+          }
+        });
     }
   }
 
@@ -86,6 +104,7 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
 
     function onPlay() {
       setPlaying(true);
+      setBlocked(false);
       startPolling();
     }
     function onPause() {
@@ -121,29 +140,50 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
     }
   }, [url, startTime, duration]);
 
-  // Autoplay (for guessers); browsers may block it until a gesture.
+  // Autoplay (for guessers); browsers may block it until a gesture, in which
+  // case play() flips on the "Tap to play" button.
   useEffect(() => {
     if (autoPlay) {
-      const t = setTimeout(play, 300);
+      const t = setTimeout(() => play(false), 300);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, autoPlay]);
 
-  // Volume is applied directly to the element so it never restarts playback.
+  // Apply the master volume directly to the element so it never restarts
+  // playback. Persistence + syncing live in the shared volume store.
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
+  // Once the user's first gesture unlocks audio, auto-start a clip that's meant
+  // to be playing — so guessers don't have to tap "play" on every round.
+  useEffect(() => {
+    if (audioUnlocked && autoPlay && audioRef.current?.paused) {
+      play(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioUnlocked]);
+
   return (
     <div className="snippet-player">
-      <audio ref={audioRef} src={url} preload="auto" />
+      <audio ref={audioRef} src={url} preload="auto" playsInline />
 
-      {!minimal && (
+      {blocked && (
+        <button
+          className="btn btn--primary snippet-tap"
+          onClick={() => play(true)}
+        >
+          <Play size={16} style={{ verticalAlign: '-3px', marginRight: 7 }} />
+          Tap to play
+        </button>
+      )}
+
+      {!minimal && !blocked && (
         <>
           <button
             className="btn btn--primary snippet-toggle"
-            onClick={playing ? pause : play}
+            onClick={playing ? pause : () => play(true)}
             aria-label={playing ? 'Pause' : 'Play'}
           >
             {playing ? <Pause size={18} /> : <Play size={18} />}
@@ -169,20 +209,6 @@ export default function SnippetPlayer({ url, startTime = 0, duration = 15, autoP
           </span>
         </>
       )}
-
-      <label className="volume" title="Volume">
-        <span aria-hidden="true">{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}</span>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={volume}
-          style={{ '--pct': `${(volume * 100).toFixed(1)}%` }}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          aria-label="Volume"
-        />
-      </label>
 
       {error && <p className="error">{error}</p>}
     </div>

@@ -34,6 +34,27 @@ function normalize(str) {
     .trim();
 }
 
+// Levenshtein edit distance — used to tell a guesser when they're *almost*
+// right ("imagin" vs "imagine") without revealing the answer.
+function editDistance(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let curr = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+// Monotonic id for chat/feed messages so the client can key them stably.
+let msgSeq = 0;
+
 // The part of a title players actually have to guess. Anything inside brackets
 // or parentheses — "(feat. Bruno Mars)", "[Remastered 2011]", "{Live}" — is
 // stripped along with the brackets themselves: it isn't the core title and just
@@ -107,11 +128,78 @@ export class Lobby {
 
     // Active round state
     this.song = null; // { title, artist, audioUrl, artwork, startTime, duration }
-    this.revealed = new Set(); // revealed character indices for clues
+    this.revealed = new Set(); // revealed title character indices for clues
+    this.revealedArtist = new Set(); // revealed artist character indices for clues
     this.roundEndsAt = null;
-    this.guessedThisRound = new Set(); // clientIds who already guessed correctly
+    this.guessedThisRound = new Set(); // clientIds who guessed the TITLE
+    this.guessedArtist = new Set(); // clientIds who guessed the ARTIST
     this.timer = null; // round-end timeout
     this.clueTimer = null; // auto-clue interval
+
+    // Skribbl-style live chat / guess feed. During a round the chat box doubles
+    // as the guess box: correct guesses are announced (without leaking the
+    // title), wrong guesses show as normal messages. Capped so it never grows
+    // unbounded.
+    this.messages = [];
+  }
+
+  // ---- chat / guess feed -------------------------------------------------
+
+  pushMessage(msg) {
+    this.messages.push({ id: ++msgSeq, ts: Date.now(), ...msg });
+    if (this.messages.length > 80) this.messages.shift();
+  }
+
+  // A normal player chat line.
+  addChat(player, text) {
+    this.pushMessage({
+      type: 'chat',
+      clientId: player.clientId,
+      username: player.username || 'Player',
+      avatar: player.avatar || null,
+      text,
+    });
+  }
+
+  // A system line (round transitions, "X guessed it!", reveals).
+  addSystem(text, kind = 'system', clientId = null) {
+    this.pushMessage({ type: kind, text, clientId });
+  }
+
+  // True when the song has a guessable artist (iTunes always provides one, but
+  // guard against blanks so the round can still end if it doesn't).
+  artistRequired() {
+    return !!(this.song && normalize(guessableTitle(this.song.artist)));
+  }
+
+  // The accepted answers for one target ('title' | 'artist'): both the core
+  // (bracket-stripped) form and the full original.
+  answersFor(target) {
+    if (!this.song) return [];
+    const raw = target === 'artist' ? this.song.artist : this.song.title;
+    return [normalize(guessableTitle(raw)), normalize(raw)].filter(Boolean);
+  }
+
+  // Does this text match the song's title OR artist? Used to block the owner /
+  // already-correct players from spoiling either answer in chat.
+  isAnswer(text) {
+    if (!this.song) return false;
+    const g = normalize(text);
+    return [...this.answersFor('title'), ...this.answersFor('artist')].includes(g);
+  }
+
+  // Is a wrong guess *almost* right (small edit distance to the title or
+  // artist)? Lets us privately nudge the guesser without revealing anything.
+  isCloseGuess(guess) {
+    if (!this.song) return false;
+    const g = normalize(guess);
+    if (g.length < 3) return false;
+    const targets = [...this.answersFor('title'), ...this.answersFor('artist')];
+    return targets.some((t) => {
+      if (!t || g === t) return false;
+      const d = editDistance(g, t);
+      return d > 0 && d <= Math.min(3, Math.max(1, Math.floor(t.length * 0.25)));
+    });
   }
 
   // ---- player management -------------------------------------------------
@@ -205,6 +293,8 @@ export class Lobby {
     this.playIndex = -1;
     this.ownerClientId = null;
     this.song = null;
+    this.messages = [];
+    this.addSystem('🎶 Game starting — everyone, pick your song!');
     this.phase = PHASES.SUBMITTING;
   }
 
@@ -254,36 +344,49 @@ export class Lobby {
     this.roundNumber = this.playIndex + 1;
     this.phase = PHASES.PLAYING;
     this.revealed = new Set();
+    this.revealedArtist = new Set();
     this.guessedThisRound = new Set();
+    this.guessedArtist = new Set();
     this.roundEndsAt = Date.now() + this.settings.roundTimer * 1000;
+    this.addSystem(`🎵 Round ${this.roundNumber}: guess ${owner?.username || 'someone'}'s song & artist!`);
     return this.song;
   }
 
-  // Reveal one more random letter as a clue. Returns true if a new letter was
-  // revealed. Driven automatically by a timer (every clueInterval seconds);
-  // never reveals the final hidden letter.
+  // Reveal one more random letter in BOTH the title and the artist as a clue.
+  // Returns true if any new letter was revealed. Driven automatically by a timer
+  // (every clueInterval seconds); never reveals the final hidden letter of each.
   revealClue() {
     if (!this.song) return false;
-    const candidates = maskableIndices(guessableTitle(this.song.title)).filter((i) => !this.revealed.has(i));
-    if (candidates.length <= 1) return false; // never fully reveal via clues
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
-    this.revealed.add(pick);
-    return true;
+    const revealOne = (text, set) => {
+      const candidates = maskableIndices(guessableTitle(text)).filter((i) => !set.has(i));
+      if (candidates.length <= 1) return false; // never fully reveal via clues
+      set.add(candidates[Math.floor(Math.random() * candidates.length)]);
+      return true;
+    };
+    const t = revealOne(this.song.title, this.revealed);
+    const a = revealOne(this.song.artist, this.revealedArtist);
+    return t || a;
   }
 
-  // Check a player's guess. Returns { correct, points } and updates score.
+  // Check a player's guess against the title AND the artist (each guessed
+  // independently). Accepts either the core form ("Lighters") or the full one
+  // ("Lighters (feat. Bruno Mars)"). Returns { correct, target, points } and
+  // updates score. A single message resolves at most one target per call.
   submitGuess(clientId, guess) {
     if (this.phase !== PHASES.PLAYING || !this.song) return { correct: false };
     if (clientId === this.ownerClientId) return { correct: false, reason: 'owner' };
-    if (this.guessedThisRound.has(clientId)) return { correct: false, reason: 'already' };
 
-    // Accept either the core title ("Lighters") or the full one ("Lighters
-    // (feat. Bruno Mars)") — the blanks only show the core, but typing the whole
-    // thing shouldn't be marked wrong.
     const g = normalize(guess);
-    if (g !== normalize(guessableTitle(this.song.title)) && g !== normalize(this.song.title)) {
-      return { correct: false };
+    if (!g) return { correct: false };
+
+    // Which still-open target does this guess match? Title takes priority.
+    let target = null;
+    if (!this.guessedThisRound.has(clientId) && this.answersFor('title').includes(g)) {
+      target = 'title';
+    } else if (!this.guessedArtist.has(clientId) && this.answersFor('artist').includes(g)) {
+      target = 'artist';
     }
+    if (!target) return { correct: false };
 
     const player = this.players.get(clientId);
     const secondsLeft = Math.max(0, Math.round((this.roundEndsAt - Date.now()) / 1000));
@@ -291,31 +394,47 @@ export class Lobby {
     // per-player clue penalty.
     const points = Math.max(20, Math.round(20 + 80 * (secondsLeft / this.settings.roundTimer)));
     player.score += points;
-    this.guessedThisRound.add(clientId);
+    if (target === 'title') this.guessedThisRound.add(clientId);
+    else this.guessedArtist.add(clientId);
 
-    // Reward the song's owner too: a fixed bonus for each player who guesses it,
-    // so hosting a round isn't a scoring dead-zone. Picking a guessable song pays off.
+    // Reward the song's owner too: a fixed bonus for each correct guess (title
+    // or artist), so hosting a round isn't a scoring dead-zone.
     const owner = this.players.get(this.ownerClientId);
     let ownerPoints = 0;
     if (owner) {
       ownerPoints = this.settings.ownerBonus;
       owner.score += ownerPoints;
     }
-    return { correct: true, points, ownerClientId: this.ownerClientId, ownerPoints };
+    // 'song' reads better than 'title' in the chat announcement.
+    const label = target === 'title' ? 'song' : 'artist';
+    return { correct: true, target: label, points, ownerClientId: this.ownerClientId, ownerPoints };
   }
 
-  // Everyone (except the song's owner) guessed? Then the round can end early.
+  // Has this player guessed everything there is to guess this round (title, and
+  // the artist when there is one)?
+  hasGuessedAll(clientId) {
+    return (
+      this.guessedThisRound.has(clientId) &&
+      (!this.artistRequired() || this.guessedArtist.has(clientId))
+    );
+  }
+
+  // Everyone (except the song's owner) guessed it all? Then the round can end early.
   allGuessed() {
     const guessers = [...this.players.values()].filter(
       (p) => p.connected && p.clientId !== this.ownerClientId
     );
     if (guessers.length === 0) return false;
-    return guessers.every((p) => this.guessedThisRound.has(p.clientId));
+    return guessers.every((p) => this.hasGuessedAll(p.clientId));
   }
 
   endRound() {
     this.phase = PHASES.ROUND_END;
     this.roundEndsAt = null;
+    if (this.song) {
+      const by = this.song.artist ? ` by ${this.song.artist}` : '';
+      this.addSystem(`The song was “${this.song.title}”${by}.`, 'reveal');
+    }
   }
 
   // The game ends once every submitted song has been played.
@@ -343,7 +462,9 @@ export class Lobby {
         isHost: p.clientId === this.hostClientId,
         isChooser: p.clientId === this.ownerClientId, // owner of the live song
         hasSubmitted: !!(p.song && p.song.title && p.song.audioUrl),
-        hasGuessed: this.guessedThisRound.has(p.clientId),
+        hasGuessedSong: this.guessedThisRound.has(p.clientId),
+        hasGuessedArtist: this.guessedArtist.has(p.clientId),
+        hasGuessed: this.hasGuessedAll(p.clientId), // guessed everything this round
       }))
       .sort((a, b) => b.score - a.score);
 
@@ -360,16 +481,19 @@ export class Lobby {
       players,
       maxPlayers: MAX_PLAYERS,
       roundEndsAt: this.roundEndsAt,
+      messages: this.messages,
     };
 
     if ((this.phase === PHASES.PLAYING || this.phase === PHASES.ROUND_END) && this.song) {
       const owner = this.players.get(this.ownerClientId);
       const guessTitle = guessableTitle(this.song.title);
+      const guessArtist = guessableTitle(this.song.artist);
       state.round = {
         masked: maskAnswer(guessTitle, this.revealed),
+        maskedArtist: maskAnswer(guessArtist, this.revealedArtist),
         titleLength: guessTitle.length,
-        cluesUsed: this.revealed.size,
-        artistHint: this.song.artist || null,
+        artistLength: guessArtist.length,
+        hasArtist: this.artistRequired(),
         ownerName: owner?.username || 'Someone',
         audio: {
           url: this.song.audioUrl,
@@ -380,6 +504,7 @@ export class Lobby {
       };
       if (this.phase === PHASES.ROUND_END) {
         state.round.answer = this.song.title;
+        state.round.artist = this.song.artist || null;
       }
     }
     return state;

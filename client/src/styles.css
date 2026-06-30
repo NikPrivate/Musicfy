@@ -84,6 +84,24 @@ body::before {
   body::before { animation: none; }
 }
 
+/* Consistent, on-brand scrollbars everywhere (page + any inner scroll area)
+   so nothing falls back to the chunky default OS bar on the dark theme. */
+* { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+/* No up/down (or left/right) stepper arrows on the scrollbar ends. */
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: var(--pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+  background-clip: padding-box;
+}
+
 .app { max-width: 980px; margin: 0 auto; padding: 28px 16px 72px; }
 .app:has(.home) { padding-top: clamp(10px, 2vh, 28px); padding-bottom: clamp(16px, 3vh, 40px); }
 
@@ -226,16 +244,26 @@ input[type='range']:focus-visible { outline: none !important; box-shadow: none; 
 /* ---- Share bar ----------------------------------------------------------- */
 .share-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .share-bar .code { font-family: var(--font-display); font-size: 28px; letter-spacing: 5px; margin-left: 10px; color: var(--text); }
-.share-bar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.share-bar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Master volume sits with the share-bar actions; a touch more room to scrub. */
+.share-volume {
+  padding: 7px 12px; border-radius: var(--pill);
+  background: rgba(0, 0, 0, 0.22); border: 1px solid var(--line);
+  color: var(--muted);
+}
+.share-volume input[type='range'] { width: 104px; }
 
 /* ---- Modal --------------------------------------------------------------- */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(8, 5, 18, 0.7);
   backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px;
+  display: flex; justify-content: center; z-index: 50; padding: 24px 16px;
+  overflow-y: auto; /* tall modals scroll instead of getting clipped */
   animation: fade-in 0.15s ease;
 }
-.modal { max-width: 440px; width: 100%; margin: 0; box-shadow: var(--shadow-pop); }
+/* Auto margins center the modal when it fits and top-anchor it (scrollable via
+   the overlay) when it's taller than the screen. */
+.modal { max-width: 440px; width: 100%; margin: auto; box-shadow: var(--shadow-pop); }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 .modal-secondary { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; padding: 0 4px; }
 
@@ -255,8 +283,134 @@ input[type='range']:focus-visible { outline: none !important; box-shadow: none; 
 .link-btn--danger:hover { color: #ff9aab; }
 
 /* ---- Room layout --------------------------------------------------------- */
-.room-grid { display: grid; grid-template-columns: 290px 1fr; gap: 18px; align-items: start; }
-@media (max-width: 720px) { .room-grid { grid-template-columns: 1fr; } }
+/* Skribbl-style: players on the left, the stage in the middle, chat on the
+   right. Give the room more room to breathe than the rest of the app. */
+.app:has(.room) { max-width: 1240px; }
+.room-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+
+/* Desktop (3-column) fits the whole game in the viewport so the page never
+   scrolls — each panel scrolls internally instead. Scoped to the in-game grid
+   so the profile / connecting screens can still scroll normally if needed. */
+@media (min-width: 1081px) {
+  .app:has(.room-grid) {
+    height: 100dvh;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .app:has(.room-grid) .room { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+  .app:has(.room-grid) .share-bar { flex-shrink: 0; }
+  .room-grid { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  /* Keep each column's card shape intact and scroll the content *inside* the
+     card, so the scrollbar sits within the card rather than floating at the
+     column's outer edge. */
+  .room-grid > .sidebar,
+  .room-grid > .stage { max-height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+  .room-grid > .chat { height: 100%; }
+  /* Sidebar: the header (and round indicator) stay put; the player list scrolls. */
+  /* `overflow: hidden auto` keeps vertical scroll but never a horizontal bar
+     (setting only overflow-y:auto would promote overflow-x to auto too). */
+  .room-grid > .sidebar > .player-list { flex: 1; min-height: 0; overflow: hidden auto; }
+  /* Stage: the single phase card fills the column and scrolls within itself. */
+  .room-grid > .stage > .card { flex: 1; min-height: 0; overflow: hidden auto; }
+  /* Cards otherwise add a bottom margin that would overflow the fixed row.
+     Exclude modals — they centre via `margin: auto` and must keep it. */
+  .app:has(.room-grid) .card:not(.modal):not(.gameover) { margin-bottom: 0; }
+}
+
+/* Medium screens: drop to players + stage, chat wraps full-width below. */
+@media (max-width: 1080px) {
+  .room-grid { grid-template-columns: 240px minmax(0, 1fr); }
+  .room-grid .chat { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .room-grid { grid-template-columns: 1fr; }
+  .room-grid .chat { grid-column: auto; }
+}
+
+/* ---- Chat / guess feed --------------------------------------------------- */
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: min(640px, calc(100vh - 150px));
+  padding: 0;
+  overflow: hidden;
+}
+.chat-title {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.chat-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.chat-messages {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 14px 16px;
+}
+/* Floating "jump to newest" button, shown only when scrolled up. */
+.chat-jump {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-display); font-weight: 600; font-size: 13px; color: #fff;
+  background: var(--brand-grad); border: none;
+  padding: 7px 14px; border-radius: var(--pill); cursor: pointer;
+  box-shadow: 0 8px 20px -8px rgba(139, 92, 255, 0.9);
+  animation: fade-in 0.15s ease;
+  transition: transform 0.12s;
+}
+.chat-jump:hover { transform: translateX(-50%) translateY(-2px); }
+.chat-empty { text-align: center; margin: auto 0; font-size: 14px; }
+
+.chat-msg { font-size: 14px; line-height: 1.4; word-break: break-word; }
+.chat-msg--chat {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  padding: 5px 9px; border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+.chat-msg--chat .avatar { align-self: center; flex-shrink: 0; }
+.chat-msg--chat.is-mine { background: var(--primary-soft); }
+.chat-name { font-weight: 700; color: var(--primary-hover); flex-shrink: 0; }
+.chat-msg--chat.is-mine .chat-name { color: var(--text); }
+.chat-text { color: var(--text); }
+.chat-msg--system {
+  text-align: center; color: var(--muted); font-size: 13px; font-weight: 600;
+  padding: 2px 4px;
+}
+.chat-msg--reveal {
+  text-align: center; font-size: 13px; font-weight: 700;
+  color: var(--accent);
+  background: rgba(255, 194, 75, 0.1);
+  border-radius: var(--radius-sm); padding: 6px 8px;
+}
+.chat-msg--correct {
+  text-align: center; font-weight: 700; color: var(--good);
+  background: rgba(70, 224, 160, 0.12);
+  border: 1px solid rgba(70, 224, 160, 0.3);
+  border-radius: var(--radius-sm); padding: 6px 8px;
+}
+
+.chat-hint {
+  margin: 0; padding: 4px 16px; font-size: 13px; font-weight: 700; text-align: center;
+  animation: fade-in 0.15s ease;
+}
+.chat-hint--close { color: var(--accent); }
+.chat-hint--correct { color: var(--good); }
+
+.chat-form {
+  display: flex; gap: 8px; padding: 12px;
+  border-top: 1px solid var(--line); flex-shrink: 0;
+}
+.chat-form input { flex: 1; min-width: 0; }
+.chat-form--correct input { border-color: var(--good); box-shadow: 0 0 0 4px rgba(70, 224, 160, 0.18); }
+.chat-form--close input { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(255, 194, 75, 0.18); }
+.chat-send { padding: 11px 14px; flex-shrink: 0; display: inline-flex; align-items: center; }
+.guess-hint { margin-top: 4px; }
 
 /* ---- Player list --------------------------------------------------------- */
 .player-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -318,6 +472,8 @@ input[type='range']:focus-visible { outline: none !important; box-shadow: none; 
 .snippet-player { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
 .snippet-meta { font-size: 13px; }
 .snippet-toggle { font-size: 18px; padding: 10px 16px; min-width: 50px; }
+/* Mobile autoplay fallback: a clear, centered call-to-action to start audio. */
+.snippet-tap { margin: 4px auto; font-size: 16px; padding: 12px 22px; }
 .snippet-time { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Seek / volume sliders — brand-coloured track + round thumb. */
@@ -360,6 +516,16 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 }
 @keyframes tile-pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .clue-count { text-align: center; }
+
+/* Two things to guess (song + artist), each with a small heading. */
+.guess-target { margin: 14px 0; }
+.guess-label {
+  display: block; text-align: center;
+  font-family: var(--font-display); font-weight: 600; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted);
+}
+.guess-target.is-done .guess-label { color: var(--good); }
+.guess-target .masked { margin: 10px 0 0; }
 
 /* ---- Album art ----------------------------------------------------------- */
 .album-art {
@@ -422,6 +588,7 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
   background: var(--surface); border: 1px solid var(--card-border);
   border-radius: var(--radius); width: 100%; max-width: 500px;
   max-height: 72vh; display: flex; flex-direction: column;
+  overflow: hidden; /* keep the rounded shape; the list scrolls inside */
   box-shadow: var(--shadow-pop);
   animation: slide-up 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -439,11 +606,7 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .song-picker-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
 .song-picker-list {
   list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
-  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
-.song-picker-list::-webkit-scrollbar { width: 7px; }
-.song-picker-list::-webkit-scrollbar-track { background: transparent; }
-.song-picker-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: var(--pill); }
 .song-picker-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; padding: 44px 24px; color: var(--muted); text-align: center; min-height: 140px;
@@ -482,13 +645,14 @@ input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius
 
 /* ---- Game over popup ----------------------------------------------------- */
 .gameover-overlay {
-  position: fixed; inset: 0; z-index: 60; overflow-y: auto;
+  position: fixed; inset: 0; z-index: 60; overflow: hidden;
   display: flex; align-items: center; justify-content: center; padding: 16px;
   background: radial-gradient(circle at 50% 0%, rgba(139, 92, 255, 0.32), rgba(11, 7, 23, 0.86) 62%);
   backdrop-filter: blur(4px);
 }
 .gameover {
   position: relative; z-index: 2; max-width: 560px; width: 100%;
+  max-height: 100%; overflow-y: auto; /* tall scoreboards scroll inside the card */
   text-align: center; margin: auto; box-shadow: var(--shadow-pop);
   animation: pop-in 0.45s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
 }

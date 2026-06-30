@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Music2, CheckCircle2, X, Search, Loader2, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Music2, CheckCircle2, X, Search, Loader2, RefreshCw, Play, Pause } from 'lucide-react';
 import { emit } from '../socket.js';
 import SnippetPlayer from './SnippetPlayer.jsx';
+import VolumeControl from './VolumeControl.jsx';
+import { useVolume } from '../volume.js';
 
 export default function SongSearch({ defaultDuration = 15, alreadySubmitted = false }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -141,12 +143,12 @@ function SongPicker({ onPick, onClose }) {
   const debounce = useRef(null);
   const inputRef = useRef(null);
 
-  // Shared preview audio: only one result plays at a time, with a single
-  // volume that persists across previews.
+  // Shared preview audio: only one result plays at a time, at the app-wide
+  // master volume.
   const audioRef = useRef(null);
   const [previewId, setPreviewId] = useState(null);
   const [previewPlaying, setPreviewPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.5);
+  const volume = useVolume();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -227,19 +229,7 @@ function SongPicker({ onPick, onClose }) {
             />
             {searching && <Loader2 size={16} className="search-spinner spin" />}
           </div>
-          <label className="volume song-picker-volume" title="Preview volume">
-            <span aria-hidden="true">{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={volume}
-              style={{ '--pct': `${(volume * 100).toFixed(1)}%` }}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              aria-label="Preview volume"
-            />
-          </label>
+          <VolumeControl className="song-picker-volume" title="Preview volume" label="Preview volume" />
           <button className="song-picker-close" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>

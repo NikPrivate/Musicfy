@@ -12,7 +12,7 @@ import {
   Check,
   CheckCircle2,
   Play,
-  XCircle,
+  MessageSquare,
   Sparkles,
   Trophy,
   RotateCcw,
@@ -31,6 +31,8 @@ import PlayerList from "../components/PlayerList.jsx";
 import SongSearch from "../components/SongSearch.jsx";
 import SnippetPlayer from "../components/SnippetPlayer.jsx";
 import Avatar from "../components/Avatar.jsx";
+import Chat from "../components/Chat.jsx";
+import VolumeControl from "../components/VolumeControl.jsx";
 
 export default function Room() {
   const { code } = useParams();
@@ -278,6 +280,13 @@ export default function Room() {
             onLeave={leaveLobby}
           />
         </main>
+
+        <Chat
+          messages={state.messages}
+          you={you}
+          isChooser={isChooser}
+          phase={state.phase}
+        />
       </div>
     </div>
   );
@@ -295,6 +304,7 @@ function ShareBar({ code, onLeave, onEdit }) {
         <strong className="code">{code}</strong>
       </div>
       <div className="share-bar-actions">
+        <VolumeControl className="share-volume" title="Master volume" label="Master volume" />
         <button className="btn btn--primary" onClick={() => setOpen(true)}>
           <Share2 size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />
           Share invite link
@@ -556,31 +566,19 @@ function SubmittingStage({ state, isHost, you }) {
 function PlayingStage({ state, isChooser, you }) {
   const round = state.round;
   const remaining = useCountdown(state.roundEndsAt);
-  const [guess, setGuess] = useState("");
-  const [feedback, setFeedback] = useState(null);
-  const [answer, setAnswer] = useState("");
-  const alreadyGuessed = you?.hasGuessed;
+  const [answer, setAnswer] = useState(null); // { title, artist } — owner only
+  const guessedSong = !!you?.hasGuessedSong;
+  const guessedArtist = !!you?.hasGuessedArtist;
+  const hasArtist = round?.hasArtist;
+  const guessedAll = !!you?.hasGuessed;
 
   useEffect(() => {
-    function onAnswer({ title }) {
-      setAnswer(title);
+    function onAnswer({ title, artist }) {
+      setAnswer({ title, artist });
     }
     socket.on("round:answer", onAnswer);
     return () => socket.off("round:answer", onAnswer);
   }, []);
-
-  async function submitGuess(e) {
-    e.preventDefault();
-    if (!guess.trim()) return;
-    const res = await emit("round:guess", { guess });
-    if (res.correct) {
-      setFeedback({ ok: true, text: `Correct! +${res.points} points` });
-      setGuess("");
-    } else {
-      setFeedback({ ok: false, text: "Not quite — try again!" });
-      setTimeout(() => setFeedback(null), 1500);
-    }
-  }
 
   return (
     <div className="card playing">
@@ -589,9 +587,6 @@ function PlayingStage({ state, isChooser, you }) {
           <Timer size={18} style={{ verticalAlign: "-3px", marginRight: 4 }} />
           {remaining}s
         </span>
-        {round?.artistHint && (
-          <span className="muted">Artist: {round.artistHint}</span>
-        )}
       </div>
 
       <p className="muted centered">
@@ -627,54 +622,53 @@ function PlayingStage({ state, isChooser, you }) {
 
       {isChooser ? (
         <p className="answer-reveal centered">
-          {answer && <strong>{answer}</strong>}
+          {answer && (
+            <>
+              <strong>{answer.title}</strong>
+              {answer.artist && (
+                <>
+                  {" "}
+                  by <strong>{answer.artist}</strong>
+                </>
+              )}
+            </>
+          )}
         </p>
       ) : (
         <>
-          <MaskedTitle masked={round.masked} />
+          <GuessTarget label="Song" masked={round.masked} done={guessedSong} />
+          {hasArtist && (
+            <GuessTarget
+              label="Artist"
+              masked={round.maskedArtist}
+              done={guessedArtist}
+            />
+          )}
           <p className="muted clue-count">
-            Guess the title · a new letter every {state.settings.clueInterval}s
+            Guess the {hasArtist ? "song & artist" : "song"} · a new letter every{" "}
+            {state.settings.clueInterval}s
           </p>
         </>
       )}
 
       {isChooser ? (
         <OwnerView />
-      ) : alreadyGuessed ? (
-        <p className="success">
+      ) : guessedAll ? (
+        <p className="success centered">
           <CheckCircle2
             size={15}
             style={{ verticalAlign: "-3px", marginRight: 5 }}
           />
-          You got it! Waiting for the round to end…
+          You got it all! Waiting for the round to end…
         </p>
       ) : (
-        <form className="guess-form" onSubmit={submitGuess}>
-          <input
-            autoFocus
-            placeholder="Type your guess…"
-            value={guess}
-            onChange={(e) => setGuess(e.target.value)}
+        <p className="muted centered guess-hint">
+          <MessageSquare
+            size={15}
+            style={{ verticalAlign: "-3px", marginRight: 5 }}
+            className="icon-primary"
           />
-          <button className="btn btn--primary" type="submit">
-            Guess
-          </button>
-        </form>
-      )}
-      {feedback && (
-        <p className={feedback.ok ? "feedback" : "feedback feedback--wrong"}>
-          {feedback.ok ? (
-            <CheckCircle2
-              size={15}
-              style={{ verticalAlign: "-3px", marginRight: 5 }}
-            />
-          ) : (
-            <XCircle
-              size={15}
-              style={{ verticalAlign: "-3px", marginRight: 5 }}
-            />
-          )}
-          {feedback.text}
+          Type the {hasArtist ? "song or artist" : "song"} in the chat to guess →
         </p>
       )}
     </div>
@@ -698,6 +692,7 @@ function OwnerView() {
 
 function RoundEndStage({ state, isHost }) {
   const answer = state.round?.answer;
+  const artist = state.round?.artist;
   const ownerName = state.round?.ownerName;
   const isLast = state.roundNumber >= state.totalRounds;
   async function next() {
@@ -718,6 +713,12 @@ function RoundEndStage({ state, isHost }) {
       <p className="answer-reveal">
         {ownerName ? `${ownerName}'s song was: ` : "The song was: "}
         <strong>{answer}</strong>
+        {artist && (
+          <>
+            {" "}
+            by <strong>{artist}</strong>
+          </>
+        )}
       </p>
       <h3>Scoreboard</h3>
       <PlayerList players={state.players} youId={null} />
@@ -867,6 +868,26 @@ function Confetti() {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+// One labelled thing to guess (the song, or the artist) with its blanks. Shows
+// a green check once the player has guessed this particular target.
+function GuessTarget({ label, masked, done }) {
+  return (
+    <div className={`guess-target ${done ? "is-done" : ""}`}>
+      <span className="guess-label">
+        {label}
+        {done && (
+          <CheckCircle2
+            size={14}
+            className="icon-green"
+            style={{ verticalAlign: "-2px", marginLeft: 5 }}
+          />
+        )}
+      </span>
+      <MaskedTitle masked={masked} />
     </div>
   );
 }

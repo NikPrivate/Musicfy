@@ -160,7 +160,10 @@ function broadcast(lobby) {
   if (lobby.song && lobby.phase === PHASES.PLAYING) {
     const owner = lobby.players.get(lobby.ownerClientId);
     if (owner?.socketId) {
-      io.to(owner.socketId).emit('round:answer', { title: lobby.song.title });
+      io.to(owner.socketId).emit('round:answer', {
+        title: lobby.song.title,
+        artist: lobby.song.artist || null,
+      });
     }
   }
 }
@@ -343,6 +346,62 @@ io.on('connection', (socket) => {
     startRound(lobby);
   });
 
+  // Live chat. During a live round the chat box doubles as the guess box
+  // (skribbl-style): a still-guessing player's message is treated as a guess —
+  // a correct one is announced without leaking the title, a wrong one shows as a
+  // normal message and the guesser is privately told if they were close.
+  socket.on('chat:send', ({ text } = {}, cb) => {
+    const lobby = manager.get(socket.data.code);
+    if (!lobby) return cb?.({ ok: false });
+    const clientId = socket.data.clientId;
+    const player = lobby.players.get(clientId);
+    if (!player) return cb?.({ ok: false });
+    const msg = (text || '').toString().replace(/\s+/g, ' ').trim().slice(0, 200);
+    if (!msg) return cb?.({ ok: false });
+
+    const playing = lobby.phase === PHASES.PLAYING && !!lobby.song;
+    const isOwner = clientId === lobby.ownerClientId;
+    const hasGuessedAll = lobby.hasGuessedAll(clientId);
+
+    // Still-guessing player (hasn't gotten both the song and artist yet): treat
+    // the message as a guess attempt at whichever target is still open.
+    if (playing && !isOwner && !hasGuessedAll) {
+      const result = lobby.submitGuess(clientId, msg);
+      if (result.correct) {
+        lobby.addSystem(
+          `${player.username || 'Player'} guessed the ${result.target}! +${result.points}`,
+          'correct',
+          clientId,
+        );
+        cb?.({ ok: true, correct: true, target: result.target, points: result.points });
+        maybeEndRoundEarly(lobby);
+        broadcast(lobby);
+        return;
+      }
+      // A wrong guess shows as a normal message — unless it's an answer they've
+      // already gotten (e.g. retyping the song while still after the artist),
+      // which we drop so it can't leak to others.
+      if (lobby.isAnswer(msg)) {
+        return cb?.({ ok: true, correct: false });
+      }
+      const close = lobby.isCloseGuess(msg);
+      lobby.addChat(player, msg);
+      cb?.({ ok: true, correct: false, close });
+      broadcast(lobby);
+      return;
+    }
+
+    // The owner and players who already guessed everything can chat — but never
+    // post an answer (title or artist), so they can't spoil it for the others.
+    if (playing && lobby.isAnswer(msg)) {
+      return cb?.({ ok: false, error: 'No spoilers!' });
+    }
+
+    lobby.addChat(player, msg);
+    cb?.({ ok: true });
+    broadcast(lobby);
+  });
+
   // A guesser submits a guess.
   socket.on('round:guess', ({ guess }, cb) => {
     const lobby = manager.get(socket.data.code);
@@ -389,6 +448,7 @@ io.on('connection', (socket) => {
     lobby.playIndex = -1;
     lobby.ownerClientId = null;
     lobby.song = null;
+    lobby.messages = [];
     for (const p of lobby.players.values()) {
       p.score = 0;
       p.song = null;
